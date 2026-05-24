@@ -158,3 +158,9 @@ make start
 ```
 
 Set `NODE_ENV=production` and provide production `DATABASE_URL` and storage credentials.
+
+## License
+
+This project is source available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md).
+
+You may use, modify, and share it for **non-commercial purposes** only. Commercial use requires separate permission from the author.

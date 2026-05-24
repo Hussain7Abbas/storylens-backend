@@ -2,6 +2,7 @@
   "name": "storylens-backend",
   "private": true,
   "version": "0.0.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "dev": "bun run --watch src/server.ts",
     "build": "tsc && bun build --target bun --minify-whitespace --minify-syntax --outfile ./dist/index.js src/server.ts",
