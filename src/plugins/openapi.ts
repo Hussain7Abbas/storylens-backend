@@ -26,7 +26,11 @@ export const openapi = new Elysia({ name: "openapi" })
 							server: {
 								default: "http://localhost",
 								description: "The server URL",
-								enum: ["http://localhost", "https://storylens-api.iscoded.com"],
+								enum: [
+								"http://localhost",
+								"https://storylens-api.iscoded.com",
+								"https://storylens-backend.netlify.app",
+							],
 							},
 						},
 					},
