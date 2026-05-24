@@ -36,6 +36,14 @@ bun run db:generate
 echo "Running database migrations..."
 bun run db:migrate:deploy
 
+if systemctl list-unit-files storylens-api.service --no-pager 2>/dev/null | grep -q storylens-api.service; then
+  if systemctl is-active --quiet storylens-api 2>/dev/null; then
+    echo "Stopping systemd storylens-api service (PM2 owns this process)..."
+    systemctl stop storylens-api
+  fi
+  systemctl disable storylens-api 2>/dev/null || true
+fi
+
 echo "Starting API with PM2 (port 3030)..."
 pm2 startOrReload "${ECOSYSTEM}" --update-env
 pm2 save

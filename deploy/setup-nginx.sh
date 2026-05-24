@@ -24,12 +24,16 @@ ln -sf "${SITES_AVAILABLE}" "${SITES_ENABLED}"
 if ! command -v certbot >/dev/null 2>&1; then
   echo "certbot not found. Install it before requesting TLS certificates."
 else
+  CERTBOT_ARGS=(--nginx -d "${DOMAIN}" --cert-name "${DOMAIN}" --non-interactive --redirect)
   if [[ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
     echo "Requesting TLS certificate for ${DOMAIN}..."
-    certbot --nginx -d "${DOMAIN}"
+    certbot certonly --webroot -w /var/www/certbot -d "${DOMAIN}" \
+      --non-interactive --agree-tos --register-unsafely-without-email
   else
     echo "TLS certificate already present for ${DOMAIN}."
   fi
+  echo "Installing TLS into nginx site config for ${DOMAIN}..."
+  certbot install "${CERTBOT_ARGS[@]}"
 fi
 
 echo "Testing nginx configuration..."
