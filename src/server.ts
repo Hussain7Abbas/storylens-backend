@@ -55,8 +55,12 @@ export const app = new Elysia()
   .use(keywordCategories)
   .use(keywordNatures)
   .use(files)
-  .use(ai)
+  .use(ai);
 
-  .listen(env.PORT, ({ url }) => {
+if (import.meta.main) {
+  app.listen(env.PORT, ({ url }) => {
     console.log(`🚀 Server is running at ${chalk.green(url)}`);
   });
+}
+
+export default app;
