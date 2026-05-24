@@ -1,6 +1,4 @@
-import chalk from 'chalk';
 import { Elysia, status } from 'elysia';
-import { env } from './env';
 import { cors, crons, logger, openapi, queryParser } from './plugins';
 import { ai } from './routes/ai';
 // import { accounts } from './routes/accounts';
@@ -56,11 +54,3 @@ export const app = new Elysia()
   .use(keywordNatures)
   .use(files)
   .use(ai);
-
-if (import.meta.main) {
-  app.listen(env.PORT, ({ url }) => {
-    console.log(`🚀 Server is running at ${chalk.green(url)}`);
-  });
-}
-
-export default app;
