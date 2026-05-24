@@ -229,6 +229,7 @@ model Keyword {
   KeywordsChapters KeywordsChapters[] @relation("KeywordsChapters")
   replacements Replacement[] @relation("KeywordReplacements")
 
+  @@unique([name, novelId])
   @@index([name])
 }
 

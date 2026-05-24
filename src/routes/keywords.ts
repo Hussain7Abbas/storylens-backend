@@ -10,6 +10,11 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
+import {
+  assertOwnsResource,
+  shouldBeGuest,
+  shouldBeUser,
+} from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitizeObject } from '@/utils/sanitize';
@@ -25,8 +30,9 @@ const keywordInclude = {
 
 export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
   .use(setup)
+  .use(shouldBeGuest())
 
-  // Get all keywords with filters (all roles)
+  // Get all keywords with filters
   .get(
     '/',
     async ({ prisma, query: { pagination, query, sorting } }) => {
@@ -129,7 +135,7 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
     },
   )
 
-  // Get keyword by ID (all roles)
+  // Get keyword by ID
   .get(
     '/:id',
     async ({ t, prisma, params: { id } }) => {
@@ -206,19 +212,10 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
   )
 
   // Create keyword (user + admin)
+  .use(shouldBeUser())
   .post(
     '/',
-    async ({ t, prisma, body, currentUser }) => {
-      if (!currentUser || currentUser.role === 'guest') {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'Guests cannot create keywords',
-            ar: 'لا يمكن للضيوف إنشاء كلمات مفتاحية',
-          }),
-        });
-      }
-
+    async ({ t, prisma, body, authedUser }) => {
       const sanitizedBody = sanitizeObject(body);
 
       const [category, nature, novel] = await Promise.all([
@@ -273,7 +270,7 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
           imageId: sanitizedBody.imageId,
           parentId: sanitizedBody.parentId,
           novelId: sanitizedBody.novelId,
-          createdById: currentUser.id,
+          createdById: authedUser.id,
         },
         include: keywordInclude,
       });
@@ -307,17 +304,7 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
   // Update keyword (own only for user, all for admin)
   .put(
     '/:id',
-    async ({ t, prisma, params: { id }, body, currentUser }) => {
-      if (!currentUser || currentUser.role === 'guest') {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'Guests cannot update keywords',
-            ar: 'لا يمكن للضيوف تعديل الكلمات المفتاحية',
-          }),
-        });
-      }
-
+    async ({ t, prisma, params: { id }, body, authedUser }) => {
       const existingKeyword = await prisma.keyword.findUnique({
         where: { id },
       });
@@ -329,18 +316,7 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
         });
       }
 
-      if (
-        currentUser.role === 'user' &&
-        existingKeyword.createdById !== currentUser.id
-      ) {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'You can only edit keywords you created',
-            ar: 'يمكنك فقط تعديل الكلمات المفتاحية التي أنشأتها',
-          }),
-        });
-      }
+      assertOwnsResource(existingKeyword.createdById, authedUser);
 
       const sanitizedBody = sanitizeObject(body);
 
@@ -432,17 +408,7 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
   // Delete keyword (own only for user, all for admin)
   .delete(
     '/:id',
-    async ({ t, prisma, params: { id }, currentUser }) => {
-      if (!currentUser || currentUser.role === 'guest') {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'Guests cannot delete keywords',
-            ar: 'لا يمكن للضيوف حذف الكلمات المفتاحية',
-          }),
-        });
-      }
-
+    async ({ t, prisma, params: { id }, authedUser }) => {
       const existingKeyword = await prisma.keyword.findUnique({
         where: { id },
         include: {
@@ -463,18 +429,7 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
         });
       }
 
-      if (
-        currentUser.role === 'user' &&
-        existingKeyword.createdById !== currentUser.id
-      ) {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'You can only delete keywords you created',
-            ar: 'يمكنك فقط حذف الكلمات المفتاحية التي أنشأتها',
-          }),
-        });
-      }
+      assertOwnsResource(existingKeyword.createdById, authedUser);
 
       if (existingKeyword._count.children > 0) {
         throw new HttpError({

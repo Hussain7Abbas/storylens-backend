@@ -1,6 +1,7 @@
 import { KeywordCategoryPlain, KeywordNaturePlain, KeywordPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
+import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
@@ -10,6 +11,7 @@ export const keywordNatures = new Elysia({
   tags: ['KeywordNatures'],
 })
   .use(setup)
+  .use(shouldBeGuest())
 
   // Get all keyword natures
   .get(
@@ -113,7 +115,8 @@ export const keywordNatures = new Elysia({
     },
   )
 
-  // Create keyword nature (User only)
+  // Create keyword nature (admin only)
+  .use(shouldBeAdmin())
   .post(
     '/',
     async ({ t, prisma, body }) => {

@@ -1,5 +1,6 @@
 import { ConfigPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
+import { shouldBeAdmin } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 
@@ -11,6 +12,7 @@ export const configs = new Elysia({
   tags: ['Configs'],
 })
   .use(setup)
+  .use(shouldBeAdmin())
 
   /**
    * Get all configs

@@ -7,6 +7,7 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
+import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitizeObject } from '@/utils/sanitize';
@@ -22,6 +23,7 @@ export const replacements = new Elysia({
   tags: ['Replacements'],
 })
   .use(setup)
+  .use(shouldBeGuest())
 
   // Get all Replacements with filters
   .get(
@@ -170,20 +172,11 @@ export const replacements = new Elysia({
     },
   )
 
-  // Create replacement (user + admin)
+  // Create replacement (admin only)
+  .use(shouldBeAdmin())
   .post(
     '/',
-    async ({ t, prisma, body, currentUser }) => {
-      if (!currentUser || currentUser.role === 'guest') {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'Guests cannot create replacements',
-            ar: 'لا يمكن للضيوف إنشاء بدائل',
-          }),
-        });
-      }
-
+    async ({ t, prisma, body, authedUser }) => {
       const sanitizedBody = sanitizeObject(body);
       await validateReplacement(sanitizedBody, prisma, t, 'create');
       const keyword = await checkChainReplacement(sanitizedBody, prisma);
@@ -194,7 +187,7 @@ export const replacements = new Elysia({
           from: sanitizedBody.from,
           to: sanitizedBody.to,
           keywordId: keyword?.id,
-          createdById: currentUser.id,
+          createdById: authedUser.id,
         },
         include: {
           keyword: true,
@@ -220,32 +213,11 @@ export const replacements = new Elysia({
     },
   )
 
-  // Update replacement (own only for user, all for admin)
+  // Update replacement (admin only)
   .put(
     '/:id',
-    async ({ t, prisma, params: { id }, body, currentUser }) => {
-      if (!currentUser || currentUser.role === 'guest') {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'Guests cannot update replacements',
-            ar: 'لا يمكن للضيوف تعديل البدائل',
-          }),
-        });
-      }
-
-      const existing = await prisma.replacement.findUnique({ where: { id } });
-      if (existing && currentUser.role === 'user' && existing.createdById !== currentUser.id) {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'You can only edit replacements you created',
-            ar: 'يمكنك فقط تعديل البدائل التي أنشأتها',
-          }),
-        });
-      }
-
-      const sanitizedBody = sanitizeObject(body);
+    async ({ t, prisma, params: { id }, body }) => {
+      const sanitizedBody = sanitizeObject({ ...body, id });
       await validateReplacement(sanitizedBody, prisma, t, 'update');
       const keyword = await checkChainReplacement(sanitizedBody, prisma);
 
@@ -283,20 +255,10 @@ export const replacements = new Elysia({
     },
   )
 
-  // Delete replacement (own only for user, all for admin)
+  // Delete replacement (admin only)
   .delete(
     '/:id',
-    async ({ t, prisma, params: { id }, currentUser }) => {
-      if (!currentUser || currentUser.role === 'guest') {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'Guests cannot delete replacements',
-            ar: 'لا يمكن للضيوف حذف البدائل',
-          }),
-        });
-      }
-
+    async ({ t, prisma, params: { id } }) => {
       const existingReplacement = await prisma.replacement.findUnique({
         where: { id },
       });
@@ -307,16 +269,6 @@ export const replacements = new Elysia({
           message: t({
             en: 'Replacement not found',
             ar: 'البديل غير موجود',
-          }),
-        });
-      }
-
-      if (currentUser.role === 'user' && existingReplacement.createdById !== currentUser.id) {
-        throw new HttpError({
-          statusCode: 403,
-          message: t({
-            en: 'You can only delete replacements you created',
-            ar: 'يمكنك فقط حذف البدائل التي أنشأتها',
           }),
         });
       }
@@ -359,11 +311,11 @@ async function validateReplacement(
     }
   }
 
-  // Check if replacement already exists
   const existingReplacement = await prisma.replacement.findFirst({
     where: {
       from: body.from,
       novelId: body.novelId,
+      ...(mode === 'update' && body.id ? { id: { not: body.id } } : {}),
     },
   });
 
@@ -376,7 +328,6 @@ async function validateReplacement(
     });
   }
 
-  // Check if there is bidirectional replacement
   const bidirectionalReplacement = await prisma.replacement.findFirst({
     where: {
       from: body.to,
@@ -399,7 +350,6 @@ async function checkChainReplacement(
   body: { from: string; to: string; novelId: string },
   prisma: PrismaClient,
 ) {
-  // check if there is a keyword linked to the "to replacement"
   const keyword = await prisma.keyword.findFirst({
     where: {
       name: body.to,
@@ -407,7 +357,6 @@ async function checkChainReplacement(
     },
   });
 
-  // Check if there is a chain of replacements then update the replacement
   const chainReplacement = await prisma.replacement.findMany({
     where: {
       to: body.from,

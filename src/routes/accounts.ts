@@ -7,6 +7,7 @@ import {
   verifyCredentialPassword,
 } from '@/lib/auth/session';
 import { setup } from '@/setup';
+import { shouldBeGuest } from '@/middleware/authorize';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
 import bcrypt from 'bcryptjs';
@@ -62,6 +63,7 @@ export const accounts = new Elysia({
   )
 
   // Get current user profile
+  .use(shouldBeGuest())
   .get(
     '/me',
     async ({ currentUser, prisma, t: translate }) => {

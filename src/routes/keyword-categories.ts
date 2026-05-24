@@ -1,6 +1,7 @@
 import { KeywordCategoryPlain, KeywordNaturePlain, KeywordPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
+import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
@@ -10,6 +11,7 @@ export const keywordCategories = new Elysia({
   tags: ['KeywordCategories'],
 })
   .use(setup)
+  .use(shouldBeGuest())
 
   // Get all keyword categories
   .get(
@@ -113,7 +115,8 @@ export const keywordCategories = new Elysia({
     },
   )
 
-  // Create keyword category (User only)
+  // Create keyword category (admin only)
+  .use(shouldBeAdmin())
   .post(
     '/',
     async ({ t, prisma, body }) => {
@@ -153,7 +156,7 @@ export const keywordCategories = new Elysia({
     },
   )
 
-  // Update keyword category (User only)
+  // Update keyword category (admin only)
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body }) => {
@@ -214,7 +217,7 @@ export const keywordCategories = new Elysia({
     },
   )
 
-  // Delete keyword category (User only)
+  // Delete keyword category (admin only)
   .delete(
     '/:id',
     async ({ t, prisma, params: { id } }) => {
