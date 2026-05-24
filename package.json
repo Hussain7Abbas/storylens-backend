@@ -5,8 +5,8 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "dev": "bun run --watch src/main.ts",
-    "build": "bunx prisma generate && tsc && bun build --target bun --minify-whitespace --minify-syntax --outfile ./dist/index.js src/main.ts",
-    "start": "bun ./dist/index.js",
+    "build": "bunx prisma generate && tsc && bun build src/index.ts --target bun --packages external --minify-whitespace --minify-syntax --outfile ./dist/index.js",
+    "start": "bun run src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "db:generate": "bunx prisma generate",
