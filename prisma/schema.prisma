@@ -1,0 +1,251 @@
+generator client {
+  provider     = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator prismabox { 
+  provider = "prismabox"
+  typeboxImportDependencyName = "elysia"
+  typeboxImportVariableName = "t"
+  inputModel = true
+  output   = "../generated/prismabox"
+} 
+
+enum FileType {
+  Image
+  Video
+}
+
+enum Gender {
+  Male
+  Female
+}
+
+model Admin {
+  id String @id @default(uuid())
+
+  // Credentials
+  username String @unique
+  password String
+
+  // Profile
+  name      String
+  phone     String
+  birthDate DateTime?
+  gender    Gender?
+
+  avatarId String?
+  avatar   File?   @relation(fields: [avatarId], references: [id], name: "AdminAvatars")
+
+  // Flags
+  isRoot Boolean @default(false)
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  uploads File[]
+}
+
+model User {
+  id String @id @default(uuid())
+
+  // Credentials
+  username String @unique
+  password String
+
+  // Profile
+  name      String
+  phone     String
+  birthDate DateTime?
+  gender    Gender?
+
+  avatarId String?
+  avatar   File?   @relation(fields: [avatarId], references: [id], name: "UserAvatars")
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  uploads File[]
+}
+
+model File {
+  id String @id @default(uuid())
+
+  url      String   @unique
+  type     FileType
+  provider_image_id String @unique
+  delete_url String
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  admin   Admin?  @relation(fields: [adminId], references: [id])
+  adminId String?
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  admins Admin[] @relation("AdminAvatars")
+  users  User[]  @relation("UserAvatars")
+  novels Novel[] @relation("NovelImages")
+  Keywords Keyword[] @relation("KeywordImages")
+}
+
+model Novel {
+  id String @id @default(uuid())
+
+  name String @unique
+  description String?
+  slugs String[] @default([])
+
+  imageId String?
+  image File? @relation(fields: [imageId], references: [id], name: "NovelImages")
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  Keywords Keyword[] @relation("NovelKeywords") 
+  chapters Chapter[] @relation("NovelChapters")
+  replacements Replacement[] @relation("NovelReplacements")
+}
+
+model Chapter {
+  id String @id @default(uuid())
+
+  name String
+  number Int
+  description String?
+
+  novelId String
+  novel Novel @relation(fields: [novelId], references: [id], name: "NovelChapters", onDelete: Cascade)
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  KeywordsChapters KeywordsChapters[] @relation("KeywordsChapters")
+
+  @@index([novelId])
+}
+
+model KeywordCategory{
+  id String @id @default(uuid())
+
+  name String
+  color String
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  keywords Keyword[] @relation("KeywordCategories")
+}
+
+model KeywordNature{
+  id String @id @default(uuid())
+
+  name String
+  color String
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  keywords Keyword[] @relation("KeywordNatures")
+}
+
+model Keyword {
+  id String @id @default(uuid())
+
+  name String
+  description String
+
+  categoryId String
+  category KeywordCategory @relation(fields: [categoryId], references: [id], name: "KeywordCategories")
+
+  natureId String
+  nature KeywordNature @relation(fields: [natureId], references: [id], name: "KeywordNatures")
+
+  imageId String?
+  image File? @relation(fields: [imageId], references: [id], name: "KeywordImages")
+
+  parentId String?
+  parent Keyword? @relation(fields: [parentId], references: [id], name: "KeywordParents")
+
+  novelId String
+  novel Novel @relation(fields: [novelId], references: [id], name: "NovelKeywords", onDelete: Cascade)
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  children Keyword[] @relation("KeywordParents")
+  KeywordsChapters KeywordsChapters[] @relation("KeywordsChapters")
+  replacements Replacement[] @relation("KeywordReplacements")
+
+  @@index([name])
+}
+
+model KeywordsChapters{
+  id String @id @default(uuid())
+
+  keywordId String
+  keyword Keyword @relation(fields: [keywordId], references: [id], name: "KeywordsChapters")
+
+  chapterId String
+  chapter Chapter @relation(fields: [chapterId], references: [id], name: "KeywordsChapters")
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([keywordId, chapterId])
+}
+
+model Replacement{
+  id String @id @default(uuid())
+
+  from String
+  to String
+
+  novelId String
+  novel Novel @relation(fields: [novelId], references: [id], name: "NovelReplacements", onDelete: Cascade)
+  
+  keywordId String?
+  keyword Keyword? @relation(fields: [keywordId], references: [id], name: "KeywordReplacements")
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([from, novelId])
+}
+
+model Config {
+  id String @id @default(uuid())
+
+  key   String @unique
+  value String @db.Text
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
