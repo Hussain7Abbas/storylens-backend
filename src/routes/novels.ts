@@ -2,7 +2,9 @@ import { ChapterPlain, FilePlain, NovelPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
 import { setup } from '@/setup';
+import { requireRole } from '@/middleware/authorize';
 import { HttpError } from '@/utils/errors';
+import { sanitize, sanitizeObject } from '@/utils/sanitize';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
 
 export const novels = new Elysia({
@@ -11,7 +13,7 @@ export const novels = new Elysia({
 })
   .use(setup)
 
-  // Get all novels with pagination
+  // Get all novels with pagination (all roles)
   .get(
     '/',
     async ({ prisma, query: { pagination, query, sorting } }) => {
@@ -84,7 +86,7 @@ export const novels = new Elysia({
     },
   )
 
-  // Get novel by ID
+  // Get novel by ID (all roles)
   .get(
     '/:id',
     async ({ t, prisma, params: { id } }) => {
@@ -135,16 +137,29 @@ export const novels = new Elysia({
     },
   )
 
-  // Create novel (User only)
+  // Create novel (user, admin only)
   .post(
     '/',
-    async ({ prisma, body }) => {
+    async ({ prisma, body, currentUser, t }) => {
+      if (!currentUser || currentUser.role === 'guest') {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'Guests cannot create novels',
+            ar: 'لا يمكن للضيوف إنشاء روايات',
+          }),
+        });
+      }
+
+      const sanitizedBody = sanitizeObject(body);
+
       const novel = await prisma.novel.create({
         data: {
-          name: body.name,
-          description: body.description,
-          imageId: body.imageId,
-          slugs: body.slugs ?? [],
+          name: sanitizedBody.name,
+          description: sanitizedBody.description,
+          imageId: sanitizedBody.imageId,
+          slugs: sanitizedBody.slugs ?? [],
+          createdById: currentUser.id,
         },
         include: {
           image: true,
@@ -171,10 +186,20 @@ export const novels = new Elysia({
     },
   )
 
-  // Update novel (User only)
+  // Update novel (admin only, except "add slug" for user)
   .put(
     '/:id',
-    async ({ t, prisma, params: { id }, body }) => {
+    async ({ t, prisma, params: { id }, body, currentUser }) => {
+      if (!currentUser || currentUser.role === 'guest') {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'Guests cannot update novels',
+            ar: 'لا يمكن للضيوف تعديل الروايات',
+          }),
+        });
+      }
+
       const existingNovel = await prisma.novel.findUnique({
         where: { id },
       });
@@ -189,13 +214,27 @@ export const novels = new Elysia({
         });
       }
 
+      // Users can only add slugs, not edit name/description/image
+      if (currentUser.role === 'user') {
+        const novel = await prisma.novel.update({
+          where: { id },
+          data: {
+            slugs: body.slugs ? sanitizeObject(body.slugs) : existingNovel.slugs,
+          },
+          include: { image: true },
+        });
+        return novel;
+      }
+
+      const sanitizedBody = sanitizeObject(body);
+
       const novel = await prisma.novel.update({
         where: { id },
         data: {
-          name: body.name,
-          description: body.description,
-          imageId: body.imageId,
-          slugs: body.slugs,
+          name: sanitizedBody.name,
+          description: sanitizedBody.description,
+          imageId: sanitizedBody.imageId,
+          slugs: sanitizedBody.slugs,
         },
         include: {
           image: true,
@@ -225,10 +264,20 @@ export const novels = new Elysia({
     },
   )
 
-  // Delete novel (User only)
+  // Delete novel (admin only)
   .delete(
     '/:id',
-    async ({ t, prisma, params: { id } }) => {
+    async ({ t, prisma, params: { id }, currentUser }) => {
+      if (!currentUser || currentUser.role !== 'admin') {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'Only admins can delete novels',
+            ar: 'فقط المسؤولون يمكنهم حذف الروايات',
+          }),
+        });
+      }
+
       const existingNovel = await prisma.novel.findUnique({
         where: { id },
       });

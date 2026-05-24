@@ -28,6 +28,7 @@
     "@t3-oss/env-core": "^0.13.8",
     "axios": "^1.12.2",
     "bcryptjs": "^3.0.2",
+    "better-auth": "^1.6.11",
     "chalk": "^5.6.2",
     "dayjs": "^1.11.18",
     "dotenv": "^17.2.2",

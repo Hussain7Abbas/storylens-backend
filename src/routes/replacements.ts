@@ -9,6 +9,7 @@ import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
+import { sanitizeObject } from '@/utils/sanitize';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
 import { orderByIds, queryWeightedSearchIds } from '@/utils/weighted-search';
 
@@ -169,19 +170,31 @@ export const replacements = new Elysia({
     },
   )
 
-  // Create replacement (User only)
+  // Create replacement (user + admin)
   .post(
     '/',
-    async ({ t, prisma, body }) => {
-      await validateReplacement(body, prisma, t, 'create');
-      const keyword = await checkChainReplacement(body, prisma);
+    async ({ t, prisma, body, currentUser }) => {
+      if (!currentUser || currentUser.role === 'guest') {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'Guests cannot create replacements',
+            ar: 'لا يمكن للضيوف إنشاء بدائل',
+          }),
+        });
+      }
+
+      const sanitizedBody = sanitizeObject(body);
+      await validateReplacement(sanitizedBody, prisma, t, 'create');
+      const keyword = await checkChainReplacement(sanitizedBody, prisma);
 
       const replacement = await prisma.replacement.create({
         data: {
-          novelId: body.novelId,
-          from: body.from,
-          to: body.to,
+          novelId: sanitizedBody.novelId,
+          from: sanitizedBody.from,
+          to: sanitizedBody.to,
           keywordId: keyword?.id,
+          createdById: currentUser.id,
         },
         include: {
           keyword: true,
@@ -207,18 +220,40 @@ export const replacements = new Elysia({
     },
   )
 
-  // Update replacement (User only)
+  // Update replacement (own only for user, all for admin)
   .put(
     '/:id',
-    async ({ t, prisma, params: { id }, body }) => {
-      await validateReplacement(body, prisma, t, 'update');
-      const keyword = await checkChainReplacement(body, prisma);
+    async ({ t, prisma, params: { id }, body, currentUser }) => {
+      if (!currentUser || currentUser.role === 'guest') {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'Guests cannot update replacements',
+            ar: 'لا يمكن للضيوف تعديل البدائل',
+          }),
+        });
+      }
+
+      const existing = await prisma.replacement.findUnique({ where: { id } });
+      if (existing && currentUser.role === 'user' && existing.createdById !== currentUser.id) {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'You can only edit replacements you created',
+            ar: 'يمكنك فقط تعديل البدائل التي أنشأتها',
+          }),
+        });
+      }
+
+      const sanitizedBody = sanitizeObject(body);
+      await validateReplacement(sanitizedBody, prisma, t, 'update');
+      const keyword = await checkChainReplacement(sanitizedBody, prisma);
 
       const replacement = await prisma.replacement.update({
         where: { id },
         data: {
-          from: body.from,
-          to: body.to,
+          from: sanitizedBody.from,
+          to: sanitizedBody.to,
           keywordId: keyword?.id,
         },
         include: {
@@ -248,10 +283,20 @@ export const replacements = new Elysia({
     },
   )
 
-  // Delete replacement (User only)
+  // Delete replacement (own only for user, all for admin)
   .delete(
     '/:id',
-    async ({ t, prisma, params: { id } }) => {
+    async ({ t, prisma, params: { id }, currentUser }) => {
+      if (!currentUser || currentUser.role === 'guest') {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'Guests cannot delete replacements',
+            ar: 'لا يمكن للضيوف حذف البدائل',
+          }),
+        });
+      }
+
       const existingReplacement = await prisma.replacement.findUnique({
         where: { id },
       });
@@ -262,6 +307,16 @@ export const replacements = new Elysia({
           message: t({
             en: 'Replacement not found',
             ar: 'البديل غير موجود',
+          }),
+        });
+      }
+
+      if (currentUser.role === 'user' && existingReplacement.createdById !== currentUser.id) {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'You can only delete replacements you created',
+            ar: 'يمكنك فقط حذف البدائل التي أنشأتها',
           }),
         });
       }
