@@ -1,5 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "bunVersion": "1.x",
-  "outputDirectory": "dist"
+  "build": {
+    "env": {
+      "VERCEL_EXPERIMENTAL_BACKENDS": "1"
+    }
+  },
+  "env": {
+    "VERCEL_EXPERIMENTAL_BACKENDS": "1"
+  }
 }
