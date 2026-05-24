@@ -1,7 +1,5 @@
 import { Elysia, status } from 'elysia';
 import { cors, crons, logger, openapi, queryParser } from './plugins';
-
-const isServerless = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
 import { ai } from './routes/ai';
 // import { accounts } from './routes/accounts';
 import { chapters } from './routes/chapters';
@@ -20,7 +18,7 @@ export const app = new Elysia()
   .use(logger)
   .use(cors)
   .use(openapi)
-  .use(isServerless ? new Elysia() : crons)
+  .use(crons)
   .use(queryParser)
 
   .error({ HttpError, AuthError })

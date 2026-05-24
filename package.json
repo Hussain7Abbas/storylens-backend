@@ -7,7 +7,6 @@
   "scripts": {
     "dev": "bun run --watch src/main.ts",
     "build": "bunx prisma generate",
-    "build:netlify": "bunx prisma generate",
     "start": "bun run src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
@@ -42,7 +41,6 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@netlify/functions": "^3.1.10",
     "@faker-js/faker": "^10.0.0",
     "@types/bun": "^1.2.22",
     "@types/jsdom": "^28.0.3",

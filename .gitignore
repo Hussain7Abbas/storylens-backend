@@ -4,7 +4,6 @@ dist
 .env.local
 .turbo
 .vercel
-.netlify
 generated
 **/*.tsbuildinfo
 .DS_Store
