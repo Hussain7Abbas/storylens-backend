@@ -8,9 +8,9 @@ Wants=network-online.target
 Type=simple
 User=storylens
 Group=storylens
-WorkingDirectory=/opt/storylens/apps/backend
+WorkingDirectory=/srv/storylens-backend
 Environment=NODE_ENV=production
-EnvironmentFile=/opt/storylens/apps/backend/.env
+EnvironmentFile=/srv/storylens-backend/.env
 ExecStart=/usr/local/bin/bun run src/main.ts
 Restart=on-failure
 RestartSec=5

@@ -38,4 +38,4 @@ nginx -t
 echo "Reloading nginx..."
 systemctl reload nginx
 
-echo "Done. Ensure the API is running on 127.0.0.1:3000 (see deploy/systemd/storylens-api.service)."
+echo "Done. Ensure the API is running on 127.0.0.1:3030 (see deploy/systemd/storylens-api.service)."
