@@ -1,31 +1,47 @@
-import { JSDOM } from 'jsdom';
+import { parseHTML } from 'linkedom';
+import xpath from 'xpath';
 import { cleanNovelTitle } from '@/lib/utils/novel-title';
 
 export function createDocumentFromHtml(html: string) {
-  return new JSDOM(html).window.document;
+  const { document } = parseHTML(html);
+  return document as unknown as Document;
+}
+
+function getNodeTextContent(node: xpath.SelectedValue): string {
+  if (typeof node === 'string') {
+    return node;
+  }
+
+  if (typeof node === 'number' || typeof node === 'boolean') {
+    return String(node);
+  }
+
+  if (node === null) {
+    return '';
+  }
+
+  if ('textContent' in node && typeof node.textContent === 'string') {
+    return node.textContent;
+  }
+
+  return '';
 }
 
 export function getRawTextFromXpath(
   xpathExpression: string,
   document: Document,
 ): string {
-  const xpathResultType =
-    document.defaultView?.XPathResult.FIRST_ORDERED_NODE_TYPE ?? 9;
+  const nodes = xpath.select(xpathExpression, document);
+  const node = Array.isArray(nodes) ? nodes[0] : nodes;
 
-  const result = document.evaluate(
-    xpathExpression,
-    document,
-    null,
-    xpathResultType,
-    null,
-  );
+  if (node === undefined) {
+    return '';
+  }
 
-  return (
-    result.singleNodeValue?.textContent
-      ?.replaceAll('\n', ' ')
-      .replace(/\s+/g, ' ')
-      .trim() ?? ''
-  );
+  return getNodeTextContent(node)
+    .replaceAll('\n', ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function extractTextFromXpath(
