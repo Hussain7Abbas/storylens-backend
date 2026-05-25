@@ -1,10 +1,10 @@
-import { FileType } from '@prisma/client';
 import { FilePlain } from '@/lib/db';
 import { uploadImage, uploadVideo } from '@/lib/storage';
 import { Elysia, t } from 'elysia';
 import { shouldBeUser } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
+import { saveUploadedFile } from '@/utils/save-uploaded-file';
 
 export const files = new Elysia({ prefix: '/files', tags: ['Files'] })
   .use(setup)
@@ -18,15 +18,7 @@ export const files = new Elysia({ prefix: '/files', tags: ['Files'] })
           file: body.file,
         });
 
-        return prisma.file.create({
-          data: {
-            url: uploadedImage.url,
-            provider_image_id: uploadedImage.id,
-            delete_url: uploadedImage.delete_url,
-            // userId: user?.id,
-            type: body.type,
-          },
-        });
+        return saveUploadedFile(prisma, uploadedImage, body.type);
       }
 
       if (body.type === 'Video') {
@@ -34,15 +26,7 @@ export const files = new Elysia({ prefix: '/files', tags: ['Files'] })
           file: body.file,
         });
 
-        return prisma.file.create({
-          data: {
-            url: uploadedVideo.url,
-            provider_image_id: uploadedVideo.id,
-            delete_url: uploadedVideo.delete_url,
-            // userId: user?.id,
-            type: body.type,
-          },
-        });
+        return saveUploadedFile(prisma, uploadedVideo, body.type);
       }
 
       throw new HttpError({
