@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { env } from "@/env";
 import { seedChapters } from "./tables/chapters";
 import { seedConfigs } from "./tables/configs";
+import { seedWebsiteSelectors } from "./tables/website-selectors";
 import { seedKeywordCategory } from "./tables/keyword-category";
 import { seedKeywordNature } from "./tables/keyword-nature";
 import { seedKeywordReplacement } from "./tables/keyword-replacement";
@@ -15,6 +16,7 @@ const prisma = new PrismaClient();
 async function main() {
 	await seedRootAdmin(prisma);
 	await seedConfigs(prisma);
+	await seedWebsiteSelectors(prisma);
 
 	if (env.NODE_ENV === "development") {
 		await seedKeywordCategory(prisma);
