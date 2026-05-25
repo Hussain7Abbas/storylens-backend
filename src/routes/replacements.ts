@@ -7,8 +7,10 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
+import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
+import { sanitizeObject } from '@/utils/sanitize';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
 import { orderByIds, queryWeightedSearchIds } from '@/utils/weighted-search';
 
@@ -21,6 +23,7 @@ export const replacements = new Elysia({
   tags: ['Replacements'],
 })
   .use(setup)
+  .use(shouldBeGuest())
 
   // Get all Replacements with filters
   .get(
@@ -169,19 +172,22 @@ export const replacements = new Elysia({
     },
   )
 
-  // Create replacement (User only)
+  // Create replacement (admin only)
+  .use(shouldBeAdmin())
   .post(
     '/',
-    async ({ t, prisma, body }) => {
-      await validateReplacement(body, prisma, t, 'create');
-      const keyword = await checkChainReplacement(body, prisma);
+    async ({ t, prisma, body, authedUser }) => {
+      const sanitizedBody = sanitizeObject(body);
+      await validateReplacement(sanitizedBody, prisma, t, 'create');
+      const keyword = await checkChainReplacement(sanitizedBody, prisma);
 
       const replacement = await prisma.replacement.create({
         data: {
-          novelId: body.novelId,
-          from: body.from,
-          to: body.to,
+          novelId: sanitizedBody.novelId,
+          from: sanitizedBody.from,
+          to: sanitizedBody.to,
           keywordId: keyword?.id,
+          createdById: authedUser.id,
         },
         include: {
           keyword: true,
@@ -207,18 +213,19 @@ export const replacements = new Elysia({
     },
   )
 
-  // Update replacement (User only)
+  // Update replacement (admin only)
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body }) => {
-      await validateReplacement(body, prisma, t, 'update');
-      const keyword = await checkChainReplacement(body, prisma);
+      const sanitizedBody = sanitizeObject({ ...body, id });
+      await validateReplacement(sanitizedBody, prisma, t, 'update');
+      const keyword = await checkChainReplacement(sanitizedBody, prisma);
 
       const replacement = await prisma.replacement.update({
         where: { id },
         data: {
-          from: body.from,
-          to: body.to,
+          from: sanitizedBody.from,
+          to: sanitizedBody.to,
           keywordId: keyword?.id,
         },
         include: {
@@ -248,7 +255,7 @@ export const replacements = new Elysia({
     },
   )
 
-  // Delete replacement (User only)
+  // Delete replacement (admin only)
   .delete(
     '/:id',
     async ({ t, prisma, params: { id } }) => {
@@ -304,11 +311,11 @@ async function validateReplacement(
     }
   }
 
-  // Check if replacement already exists
   const existingReplacement = await prisma.replacement.findFirst({
     where: {
       from: body.from,
       novelId: body.novelId,
+      ...(mode === 'update' && body.id ? { id: { not: body.id } } : {}),
     },
   });
 
@@ -321,7 +328,6 @@ async function validateReplacement(
     });
   }
 
-  // Check if there is bidirectional replacement
   const bidirectionalReplacement = await prisma.replacement.findFirst({
     where: {
       from: body.to,
@@ -344,7 +350,6 @@ async function checkChainReplacement(
   body: { from: string; to: string; novelId: string },
   prisma: PrismaClient,
 ) {
-  // check if there is a keyword linked to the "to replacement"
   const keyword = await prisma.keyword.findFirst({
     where: {
       name: body.to,
@@ -352,7 +357,6 @@ async function checkChainReplacement(
     },
   });
 
-  // Check if there is a chain of replacements then update the replacement
   const chainReplacement = await prisma.replacement.findMany({
     where: {
       to: body.from,

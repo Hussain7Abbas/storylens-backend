@@ -10,25 +10,60 @@ interface LoggerParams {
   path: string;
 }
 
+const formatStatus = (status: number) =>
+  status >= 400
+    ? chalk.bold.red(status)
+    : status >= 300
+      ? chalk.bold.yellow(status)
+      : status >= 200
+        ? chalk.bold.green(status)
+        : chalk.bold.gray(status);
+
 const log = (params: LoggerParams) => {
   if (!METHODS.includes(params.method) || typeof params.status !== 'number') {
     return;
   }
 
   const method = chalk.bold.blue(params.method);
-
-  const status =
-    params.status >= 400
-      ? chalk.bold.red(params.status)
-      : params.status >= 300
-        ? chalk.bold.yellow(params.status)
-        : params.status >= 200
-          ? chalk.bold.green(params.status)
-          : chalk.bold.gray(params.status);
-
+  const status = formatStatus(params.status);
   const path = chalk.bold.cyan(params.path);
 
   console.log(`${method} ${status} ${path}`);
+};
+
+interface ErrorLogParams {
+  method: string;
+  path: string;
+  code: string | number;
+  status: number;
+  message: string;
+  stack?: string;
+}
+
+export const logError = ({
+  method,
+  path,
+  code,
+  status,
+  message,
+  stack,
+}: ErrorLogParams) => {
+  const formattedMethod = chalk.bold.blue(method);
+  const formattedStatus = formatStatus(status);
+  const formattedPath = chalk.bold.cyan(path);
+  const formattedCode = chalk.bold.magenta(String(code));
+  const formattedMessage = chalk.red(message);
+  const output = `${formattedMethod} ${formattedStatus} ${formattedPath} ${formattedCode} ${formattedMessage}`;
+
+  if (status >= 500) {
+    console.error(output);
+    if (stack) {
+      console.error(chalk.gray(stack));
+    }
+    return;
+  }
+
+  console.warn(output);
 };
 
 export const logger = new Elysia({ name: 'logger' })

@@ -10,8 +10,14 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
+import {
+  assertOwnsResource,
+  shouldBeGuest,
+  shouldBeUser,
+} from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
+import { sanitizeObject } from '@/utils/sanitize';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
 import { orderByIds, queryWeightedSearchIds } from '@/utils/weighted-search';
 
@@ -24,6 +30,7 @@ const keywordInclude = {
 
 export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
   .use(setup)
+  .use(shouldBeGuest())
 
   // Get all keywords with filters
   .get(
@@ -204,52 +211,44 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
     },
   )
 
-  // Create keyword (User only)
+  // Create keyword (user + admin)
+  .use(shouldBeUser())
   .post(
     '/',
-    async ({ t, prisma, body }) => {
-      // Verify related entities exist
+    async ({ t, prisma, body, authedUser }) => {
+      const sanitizedBody = sanitizeObject(body);
+
       const [category, nature, novel] = await Promise.all([
-        prisma.keywordCategory.findUnique({ where: { id: body.categoryId } }),
-        prisma.keywordNature.findUnique({ where: { id: body.natureId } }),
-        prisma.novel.findUnique({ where: { id: body.novelId } }),
+        prisma.keywordCategory.findUnique({ where: { id: sanitizedBody.categoryId } }),
+        prisma.keywordNature.findUnique({ where: { id: sanitizedBody.natureId } }),
+        prisma.novel.findUnique({ where: { id: sanitizedBody.novelId } }),
       ]);
 
       if (!category) {
         throw new HttpError({
           statusCode: 404,
-          message: t({
-            en: 'Category not found',
-            ar: 'الفئة غير موجودة',
-          }),
+          message: t({ en: 'Category not found', ar: 'الفئة غير موجودة' }),
         });
       }
 
       if (!nature) {
         throw new HttpError({
           statusCode: 404,
-          message: t({
-            en: 'Nature not found',
-            ar: 'الطبيعة غير موجودة',
-          }),
+          message: t({ en: 'Nature not found', ar: 'الطبيعة غير موجودة' }),
         });
       }
 
       if (!novel) {
         throw new HttpError({
           statusCode: 404,
-          message: t({
-            en: 'Novel not found',
-            ar: 'الرواية غير موجودة',
-          }),
+          message: t({ en: 'Novel not found', ar: 'الرواية غير موجودة' }),
         });
       }
 
-      // Check if keyword name already exists for this novel
       const existingKeyword = await prisma.keyword.findFirst({
         where: {
-          name: body.name,
-          novelId: body.novelId,
+          name: sanitizedBody.name,
+          novelId: sanitizedBody.novelId,
         },
       });
 
@@ -264,20 +263,16 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
 
       const keyword = await prisma.keyword.create({
         data: {
-          name: body.name,
-          description: body.description,
-          categoryId: body.categoryId,
-          natureId: body.natureId,
-          imageId: body.imageId,
-          parentId: body.parentId,
-          novelId: body.novelId,
+          name: sanitizedBody.name,
+          description: sanitizedBody.description,
+          categoryId: sanitizedBody.categoryId,
+          natureId: sanitizedBody.natureId,
+          imageId: sanitizedBody.imageId,
+          parentId: sanitizedBody.parentId,
+          novelId: sanitizedBody.novelId,
+          createdById: authedUser.id,
         },
-        include: {
-          category: true,
-          nature: true,
-          image: true,
-          parent: true,
-        },
+        include: keywordInclude,
       });
 
       return keyword;
@@ -306,10 +301,10 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
     },
   )
 
-  // Update keyword (User only)
+  // Update keyword (own only for user, all for admin)
   .put(
     '/:id',
-    async ({ t, prisma, params: { id }, body }) => {
+    async ({ t, prisma, params: { id }, body, authedUser }) => {
       const existingKeyword = await prisma.keyword.findUnique({
         where: { id },
       });
@@ -317,18 +312,18 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
       if (!existingKeyword) {
         throw new HttpError({
           statusCode: 404,
-          message: t({
-            en: 'Keyword not found',
-            ar: 'الكلمة المفتاحية غير موجودة',
-          }),
+          message: t({ en: 'Keyword not found', ar: 'الكلمة المفتاحية غير موجودة' }),
         });
       }
 
-      // If changing name, check for conflicts within the same novel
-      if (body.name && body.name !== existingKeyword.name) {
+      assertOwnsResource(existingKeyword.createdById, authedUser);
+
+      const sanitizedBody = sanitizeObject(body);
+
+      if (sanitizedBody.name && sanitizedBody.name !== existingKeyword.name) {
         const conflictKeyword = await prisma.keyword.findFirst({
           where: {
-            name: body.name,
+            name: sanitizedBody.name,
             novelId: existingKeyword.novelId,
             id: { not: id },
           },
@@ -344,34 +339,27 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
         }
       }
 
-      // If changing category or nature, verify they exist
-      if (body.categoryId || body.natureId) {
+      if (sanitizedBody.categoryId || sanitizedBody.natureId) {
         const [category, nature] = await Promise.all([
-          body.categoryId
-            ? prisma.keywordCategory.findUnique({ where: { id: body.categoryId } })
+          sanitizedBody.categoryId
+            ? prisma.keywordCategory.findUnique({ where: { id: sanitizedBody.categoryId } })
             : Promise.resolve(null),
-          body.natureId
-            ? prisma.keywordNature.findUnique({ where: { id: body.natureId } })
+          sanitizedBody.natureId
+            ? prisma.keywordNature.findUnique({ where: { id: sanitizedBody.natureId } })
             : Promise.resolve(null),
         ]);
 
-        if (body.categoryId && !category) {
+        if (sanitizedBody.categoryId && !category) {
           throw new HttpError({
             statusCode: 404,
-            message: t({
-              en: 'Category not found',
-              ar: 'الفئة غير موجودة',
-            }),
+            message: t({ en: 'Category not found', ar: 'الفئة غير موجودة' }),
           });
         }
 
-        if (body.natureId && !nature) {
+        if (sanitizedBody.natureId && !nature) {
           throw new HttpError({
             statusCode: 404,
-            message: t({
-              en: 'Nature not found',
-              ar: 'الطبيعة غير موجودة',
-            }),
+            message: t({ en: 'Nature not found', ar: 'الطبيعة غير موجودة' }),
           });
         }
       }
@@ -379,19 +367,14 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
       const keyword = await prisma.keyword.update({
         where: { id },
         data: {
-          name: body.name,
-          description: body.description,
-          categoryId: body.categoryId,
-          natureId: body.natureId,
-          imageId: body.imageId,
-          parentId: body.parentId,
+          name: sanitizedBody.name,
+          description: sanitizedBody.description,
+          categoryId: sanitizedBody.categoryId,
+          natureId: sanitizedBody.natureId,
+          imageId: sanitizedBody.imageId,
+          parentId: sanitizedBody.parentId,
         },
-        include: {
-          category: true,
-          nature: true,
-          image: true,
-          parent: true,
-        },
+        include: keywordInclude,
       });
 
       return keyword;
@@ -422,10 +405,10 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
     },
   )
 
-  // Delete keyword (User only)
+  // Delete keyword (own only for user, all for admin)
   .delete(
     '/:id',
-    async ({ t, prisma, params: { id } }) => {
+    async ({ t, prisma, params: { id }, authedUser }) => {
       const existingKeyword = await prisma.keyword.findUnique({
         where: { id },
         include: {
@@ -442,14 +425,12 @@ export const keywords = new Elysia({ prefix: '/keywords', tags: ['Keywords'] })
       if (!existingKeyword) {
         throw new HttpError({
           statusCode: 404,
-          message: t({
-            en: 'Keyword not found',
-            ar: 'الكلمة المفتاحية غير موجودة',
-          }),
+          message: t({ en: 'Keyword not found', ar: 'الكلمة المفتاحية غير موجودة' }),
         });
       }
 
-      // Check if keyword has children
+      assertOwnsResource(existingKeyword.createdById, authedUser);
+
       if (existingKeyword._count.children > 0) {
         throw new HttpError({
           message: t({

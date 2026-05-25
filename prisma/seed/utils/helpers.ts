@@ -1,4 +1,3 @@
-import type { Gender } from '@prisma/client';
 import { dunna } from 'dunna';
 import { femalesNames, malesNames } from './constants';
 
@@ -22,7 +21,7 @@ export function genPhoneNumber(): string {
   return `${countryCode}${carrierCode}${firstPart}${secondPart}${thirdPart}`;
 }
 
-export function genFullName(gender: Gender): string {
+export function genFullName(gender: 'Male' | 'Female'): string {
   return gender === 'Male'
     ? `${dunna.basic.choice(malesNames)} ${dunna.basic.choice(malesNames)} ${dunna.basic.choice(malesNames)}`
     : `${dunna.basic.choice(femalesNames)} ${dunna.basic.choice(malesNames)} ${dunna.basic.choice(malesNames)}`;

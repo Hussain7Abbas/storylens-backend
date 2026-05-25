@@ -25,6 +25,8 @@ export async function seedKeywords(prisma: PrismaClient) {
   const categoryByName = indexBy(keywordCategories, (category) => category.name);
   const natureByName = indexBy(keywordNatures, (nature) => nature.name);
 
+  const seen = new Set<string>();
+
   await prisma.keyword.createMany({
     data: seedKeywordsData.flatMap((keyword) => {
       const novel = novelByName.get(keyword.novelName);
@@ -36,9 +38,16 @@ export async function seedKeywords(prisma: PrismaClient) {
         return [];
       }
 
+      const name = keyword.name.trim();
+      const dedupeKey = `${novel.id}::${name}`;
+      if (seen.has(dedupeKey)) {
+        return [];
+      }
+      seen.add(dedupeKey);
+
       return [
         {
-          name: keyword.name.trim(),
+          name,
           description: keyword.description,
           novelId: novel.id,
           categoryId: categoryRecord.id,

@@ -1,8 +1,15 @@
 import { ChapterPlain, FilePlain, NovelPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
+import {
+  isAdmin,
+  shouldBeAdmin,
+  shouldBeGuest,
+  shouldBeUser,
+} from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
+import { sanitize, sanitizeObject } from '@/utils/sanitize';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
 
 export const novels = new Elysia({
@@ -10,6 +17,7 @@ export const novels = new Elysia({
   tags: ['Novels'],
 })
   .use(setup)
+  .use(shouldBeGuest())
 
   // Get all novels with pagination
   .get(
@@ -135,16 +143,38 @@ export const novels = new Elysia({
     },
   )
 
-  // Create novel (User only)
+  // Create novel (user: name + slugs only; admin: full)
+  .use(shouldBeUser())
   .post(
     '/',
-    async ({ prisma, body }) => {
+    async ({ prisma, body, authedUser, t }) => {
+      if (isAdmin(authedUser)) {
+        const sanitizedBody = sanitizeObject(body);
+
+        const novel = await prisma.novel.create({
+          data: {
+            name: sanitizedBody.name,
+            description: sanitizedBody.description,
+            imageId: sanitizedBody.imageId,
+            slugs: sanitizedBody.slugs ?? [],
+            createdById: authedUser.id,
+          },
+          include: {
+            image: true,
+          },
+        });
+
+        return novel;
+      }
+
+      const name = sanitize(body.name);
+      const slugs = body.slugs?.map((slug) => sanitize(slug)) ?? [];
+
       const novel = await prisma.novel.create({
         data: {
-          name: body.name,
-          description: body.description,
-          imageId: body.imageId,
-          slugs: body.slugs ?? [],
+          name,
+          slugs,
+          createdById: authedUser.id,
         },
         include: {
           image: true,
@@ -171,10 +201,10 @@ export const novels = new Elysia({
     },
   )
 
-  // Update novel (User only)
+  // Update novel (user: slugs only; admin: full)
   .put(
     '/:id',
-    async ({ t, prisma, params: { id }, body }) => {
+    async ({ t, prisma, params: { id }, body, authedUser }) => {
       const existingNovel = await prisma.novel.findUnique({
         where: { id },
       });
@@ -189,13 +219,27 @@ export const novels = new Elysia({
         });
       }
 
+      if (!isAdmin(authedUser)) {
+        const slugs = body.slugs?.map((slug) => sanitize(slug)) ?? existingNovel.slugs;
+
+        const novel = await prisma.novel.update({
+          where: { id },
+          data: { slugs },
+          include: { image: true },
+        });
+
+        return novel;
+      }
+
+      const sanitizedBody = sanitizeObject(body);
+
       const novel = await prisma.novel.update({
         where: { id },
         data: {
-          name: body.name,
-          description: body.description,
-          imageId: body.imageId,
-          slugs: body.slugs,
+          name: sanitizedBody.name,
+          description: sanitizedBody.description,
+          imageId: sanitizedBody.imageId,
+          slugs: sanitizedBody.slugs,
         },
         include: {
           image: true,
@@ -225,7 +269,8 @@ export const novels = new Elysia({
     },
   )
 
-  // Delete novel (User only)
+  // Delete novel (admin only)
+  .use(shouldBeAdmin())
   .delete(
     '/:id',
     async ({ t, prisma, params: { id } }) => {

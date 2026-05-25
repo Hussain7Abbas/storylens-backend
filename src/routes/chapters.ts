@@ -9,12 +9,14 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
+import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
 
 export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
   .use(setup)
+  .use(shouldBeGuest())
 
   // Get all chapters for a novel
   .get(
@@ -140,7 +142,8 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
     },
   )
 
-  // Create chapter (User only)
+  // Create chapter (admin only)
+  .use(shouldBeAdmin())
   .post(
     '/',
     async ({ t, prisma, body }) => {

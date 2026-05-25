@@ -1,7 +1,7 @@
 import { Elysia, status } from 'elysia';
-import { cors, crons, logger, openapi, queryParser } from './plugins';
+import { cors, crons, logError, logger, openapi, queryParser } from './plugins';
 import { ai } from './routes/ai';
-// import { accounts } from './routes/accounts';
+import { accounts } from './routes/accounts';
 import { chapters } from './routes/chapters';
 import { configs } from './routes/configs';
 import { files } from './routes/files';
@@ -22,14 +22,43 @@ export const app = new Elysia()
   .use(queryParser)
 
   .error({ HttpError, AuthError })
-  .onError(({ code, error }) => {
+  .onError(({ code, error, request, path, set }) => {
     if (code === 'HttpError') {
+      logError({
+        method: request.method,
+        path,
+        code,
+        status: error.statusCode,
+        message: error.message,
+      });
+
       return status(error.statusCode, { message: error.message });
     }
 
     if (code === 'AuthError') {
+      logError({
+        method: request.method,
+        path,
+        code,
+        status: 401,
+        message: error.message,
+      });
+
       return status(401, { message: error.message });
     }
+
+    const statusCode = typeof set.status === 'number' ? set.status : 500;
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+
+    logError({
+      method: request.method,
+      path,
+      code,
+      status: statusCode,
+      message,
+      stack,
+    });
   })
   .guard({
     response: {
@@ -43,7 +72,7 @@ export const app = new Elysia()
     message: 'Made with ❤️ by Hussain Abbas, for docs checkout /docs',
   }))
 
-  // .use(accounts)
+  .use(accounts)
   .use(configs)
   .use(novels)
   .use(chapters)

@@ -1,5 +1,5 @@
 generator client {
-  provider     = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -20,50 +20,26 @@ enum FileType {
   Video
 }
 
-enum Gender {
-  Male
-  Female
-}
-
-model Admin {
-  id String @id @default(uuid())
-
-  // Credentials
-  username String @unique
-  password String
-
-  // Profile
-  name      String
-  phone     String
-  birthDate DateTime?
-  gender    Gender?
-
-  avatarId String?
-  avatar   File?   @relation(fields: [avatarId], references: [id], name: "AdminAvatars")
-
-  // Flags
-  isRoot Boolean @default(false)
-
-  // Metadata
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  uploads File[]
+enum Role {
+  guest
+  user
+  admin
 }
 
 model User {
   id String @id @default(uuid())
 
   // Credentials
-  username String @unique
-  password String
+  email         String  @unique
+  emailVerified Boolean @default(false)
+  username      String  @unique
+  password      String
 
   // Profile
-  name      String
-  phone     String
-  birthDate DateTime?
-  gender    Gender?
+  name String
+
+  // Authorization
+  role Role @default(guest)
 
   avatarId String?
   avatar   File?   @relation(fields: [avatarId], references: [id], name: "UserAvatars")
@@ -73,7 +49,59 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  uploads File[]
+  uploads      File[]
+  novels       Novel[]       @relation("NovelCreator")
+  keywords     Keyword[]     @relation("KeywordCreator")
+  replacements Replacement[] @relation("ReplacementCreator")
+  sessions     Session[]
+  accounts     Account[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
 }
 
 model File {
@@ -87,15 +115,11 @@ model File {
   userId String?
   user   User?   @relation(fields: [userId], references: [id])
 
-  admin   Admin?  @relation(fields: [adminId], references: [id])
-  adminId String?
-
   // Metadata
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  admins Admin[] @relation("AdminAvatars")
   users  User[]  @relation("UserAvatars")
   novels Novel[] @relation("NovelImages")
   Keywords Keyword[] @relation("KeywordImages")
@@ -110,6 +134,9 @@ model Novel {
 
   imageId String?
   image File? @relation(fields: [imageId], references: [id], name: "NovelImages")
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], name: "NovelCreator")
 
   // Metadata
   createdAt DateTime @default(now())
@@ -190,6 +217,9 @@ model Keyword {
   novelId String
   novel Novel @relation(fields: [novelId], references: [id], name: "NovelKeywords", onDelete: Cascade)
 
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], name: "KeywordCreator")
+
   // Metadata
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -199,6 +229,7 @@ model Keyword {
   KeywordsChapters KeywordsChapters[] @relation("KeywordsChapters")
   replacements Replacement[] @relation("KeywordReplacements")
 
+  @@unique([name, novelId])
   @@index([name])
 }
 
@@ -229,6 +260,9 @@ model Replacement{
   
   keywordId String?
   keyword Keyword? @relation(fields: [keywordId], references: [id], name: "KeywordReplacements")
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], name: "ReplacementCreator")
 
   // Metadata
   createdAt DateTime @default(now())

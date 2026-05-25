@@ -2,11 +2,13 @@ import { FileType } from '@prisma/client';
 import { FilePlain } from '@/lib/db';
 import { uploadImage, uploadVideo } from '@/lib/storage';
 import { Elysia, t } from 'elysia';
+import { shouldBeUser } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 
 export const files = new Elysia({ prefix: '/files', tags: ['Files'] })
   .use(setup)
+  .use(shouldBeUser())
 
   .post(
     '/upload',
