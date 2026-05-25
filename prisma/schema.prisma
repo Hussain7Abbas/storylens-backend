@@ -26,6 +26,11 @@ enum Role {
   admin
 }
 
+enum MatchingType {
+  FULL
+  PARTIAL
+}
+
 model User {
   id String @id @default(uuid())
 
@@ -201,6 +206,7 @@ model Keyword {
 
   name String
   description String
+  matchingType MatchingType @default(FULL)
 
   categoryId String
   category KeywordCategory @relation(fields: [categoryId], references: [id], name: "KeywordCategories")
@@ -254,6 +260,7 @@ model Replacement{
 
   from String
   to String
+  matchingType MatchingType @default(FULL)
 
   novelId String
   novel Novel @relation(fields: [novelId], references: [id], name: "NovelReplacements", onDelete: Cascade)

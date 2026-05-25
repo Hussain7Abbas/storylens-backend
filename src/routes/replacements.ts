@@ -3,6 +3,7 @@ import {
   KeywordCategoryPlain,
   KeywordNaturePlain,
   KeywordPlain,
+  MatchingType,
   ReplacementPlain,
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
@@ -186,6 +187,7 @@ export const replacements = new Elysia({
           novelId: sanitizedBody.novelId,
           from: sanitizedBody.from,
           to: sanitizedBody.to,
+          matchingType: sanitizedBody.matchingType ?? 'FULL',
           keywordId: keyword?.id,
           createdById: authedUser.id,
         },
@@ -201,6 +203,7 @@ export const replacements = new Elysia({
         novelId: t.String({ format: 'uuid' }),
         from: t.String({ minLength: 1 }),
         to: t.String({ minLength: 1 }),
+        matchingType: t.Optional(MatchingType),
       }),
       response: {
         200: t.Composite([
@@ -226,6 +229,7 @@ export const replacements = new Elysia({
         data: {
           from: sanitizedBody.from,
           to: sanitizedBody.to,
+          matchingType: sanitizedBody.matchingType,
           keywordId: keyword?.id,
         },
         include: {
@@ -243,6 +247,7 @@ export const replacements = new Elysia({
         novelId: t.String({ format: 'uuid' }),
         from: t.String({ minLength: 1 }),
         to: t.String({ minLength: 1 }),
+        matchingType: MatchingType,
       }),
       response: {
         200: t.Composite([
