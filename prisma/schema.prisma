@@ -12,7 +12,7 @@ generator prismabox {
   typeboxImportDependencyName = "elysia"
   typeboxImportVariableName = "t"
   inputModel = true
-  output   = "../generated/prismabox"
+  output   = "./generated/prismabox"
 } 
 
 enum FileType {
@@ -24,6 +24,11 @@ enum Role {
   guest
   user
   admin
+}
+
+enum MatchingType {
+  FULL
+  PARTIAL
 }
 
 model User {
@@ -171,7 +176,8 @@ model Chapter {
 model KeywordCategory{
   id String @id @default(uuid())
 
-  name String
+  nameEn String?
+  nameAr String?
   color String
 
   // Metadata
@@ -185,7 +191,8 @@ model KeywordCategory{
 model KeywordNature{
   id String @id @default(uuid())
 
-  name String
+  nameEn String?
+  nameAr String?
   color String
 
   // Metadata
@@ -201,6 +208,7 @@ model Keyword {
 
   name String
   description String
+  matchingType MatchingType @default(FULL)
 
   categoryId String
   category KeywordCategory @relation(fields: [categoryId], references: [id], name: "KeywordCategories")
@@ -254,6 +262,7 @@ model Replacement{
 
   from String
   to String
+  matchingType MatchingType @default(FULL)
 
   novelId String
   novel Novel @relation(fields: [novelId], references: [id], name: "NovelReplacements", onDelete: Cascade)
@@ -282,4 +291,24 @@ model Config {
   updatedAt DateTime @updatedAt
 
   @@index([key])
+}
+
+model WebsiteSelector {
+  id String @id @default(uuid())
+
+  website String @unique
+
+  novelXpathValue String?
+  novelXpathRegex String?
+  novelUrlRegex   String?
+
+  chapterXpathValue String?
+  chapterXpathRegex String?
+  chapterUrlRegex   String?
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([website])
 }

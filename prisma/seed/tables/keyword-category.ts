@@ -6,7 +6,8 @@ export async function seedKeywordCategory(prisma: PrismaClient) {
 
   await prisma.keywordCategory.createMany({
     data: seedKeywordCategories.map((category) => ({
-      name: category.name,
+      nameEn: category.nameEn,
+      nameAr: category.nameAr,
       color: category.color,
     })),
   });

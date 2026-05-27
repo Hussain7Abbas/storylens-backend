@@ -123,7 +123,7 @@ export const keywordNatures = new Elysia({
       // Check if nature name already exists
       const existingNature = await prisma.keywordNature.findFirst({
         where: {
-          name: body.name,
+          nameEn: body.nameEn,
         },
       });
 
@@ -138,7 +138,8 @@ export const keywordNatures = new Elysia({
 
       const nature = await prisma.keywordNature.create({
         data: {
-          name: body.name,
+          nameEn: body.nameEn,
+          nameAr: body.nameAr,
           color: body.color,
         },
       });
@@ -147,7 +148,8 @@ export const keywordNatures = new Elysia({
     },
     {
       body: t.Object({
-        name: t.String({ minLength: 1 }),
+        nameEn: t.Optional(t.String()),
+        nameAr: t.Optional(t.String()),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
       }),
       response: {
@@ -174,11 +176,11 @@ export const keywordNatures = new Elysia({
         });
       }
 
-      // If changing name, check for conflicts
-      if (body.name && body.name !== existingNature.name) {
+      // If changing nameEn, check for conflicts
+      if (body.nameEn && body.nameEn !== existingNature.nameEn) {
         const conflictNature = await prisma.keywordNature.findFirst({
           where: {
-            name: body.name,
+            nameEn: body.nameEn,
             id: { not: id },
           },
         });
@@ -196,7 +198,8 @@ export const keywordNatures = new Elysia({
       const nature = await prisma.keywordNature.update({
         where: { id },
         data: {
-          name: body.name,
+          nameEn: body.nameEn,
+          nameAr: body.nameAr,
           color: body.color,
         },
       });
@@ -208,7 +211,8 @@ export const keywordNatures = new Elysia({
         id: t.String({ format: 'uuid' }),
       }),
       body: t.Object({
-        name: t.String({ minLength: 1 }),
+        nameEn: t.Optional(t.String()),
+        nameAr: t.Optional(t.String()),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
       }),
       response: {

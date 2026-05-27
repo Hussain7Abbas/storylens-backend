@@ -8,4 +8,4 @@ if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
 }
 
-export * from '../../../generated/prismabox/barrel';
+export * from '../../../prisma/generated/prismabox/barrel';

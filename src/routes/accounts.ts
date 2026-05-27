@@ -332,4 +332,8 @@ export const accounts = new Elysia({
   // BetterAuth handler (OAuth etc.) — must be last
   .all('/*', async ({ request }) => {
     return auth.handler(request);
+  }, {
+    detail: {
+      hide: true,
+    },
   });
