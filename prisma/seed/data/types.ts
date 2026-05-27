@@ -22,12 +22,14 @@ export type SeedReplacement = {
 };
 
 export type SeedKeywordCategory = {
-  name: string;
+  nameEn?: string;
+  nameAr?: string;
   color: string;
 };
 
 export type SeedKeywordNature = {
-  name: string;
+  nameEn?: string;
+  nameAr?: string;
   color: string;
 };
 

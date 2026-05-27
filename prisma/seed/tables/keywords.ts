@@ -22,8 +22,8 @@ export async function seedKeywords(prisma: PrismaClient) {
   }
 
   const novelByName = indexBy(novels, (novel) => novel.name);
-  const categoryByName = indexBy(keywordCategories, (category) => category.name);
-  const natureByName = indexBy(keywordNatures, (nature) => nature.name);
+  const categoryByName = indexBy(keywordCategories, (category) => category.nameAr ?? category.nameEn ?? "");
+  const natureByName = indexBy(keywordNatures, (nature) => nature.nameAr ?? nature.nameEn ?? "");
 
   const seen = new Set<string>();
 

@@ -123,7 +123,7 @@ export const keywordCategories = new Elysia({
       // Check if category name already exists
       const existingCategory = await prisma.keywordCategory.findFirst({
         where: {
-          name: body.name,
+          nameEn: body.nameEn,
         },
       });
 
@@ -138,7 +138,8 @@ export const keywordCategories = new Elysia({
 
       const category = await prisma.keywordCategory.create({
         data: {
-          name: body.name,
+          nameEn: body.nameEn,
+          nameAr: body.nameAr,
           color: body.color,
         },
       });
@@ -147,7 +148,8 @@ export const keywordCategories = new Elysia({
     },
     {
       body: t.Object({
-        name: t.String({ minLength: 1 }),
+        nameEn: t.Optional(t.String()),
+        nameAr: t.Optional(t.String()),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
       }),
       response: {
@@ -174,11 +176,11 @@ export const keywordCategories = new Elysia({
         });
       }
 
-      // If changing name, check for conflicts
-      if (body.name && body.name !== existingCategory.name) {
+      // If changing nameEn, check for conflicts
+      if (body.nameEn && body.nameEn !== existingCategory.nameEn) {
         const conflictCategory = await prisma.keywordCategory.findFirst({
           where: {
-            name: body.name,
+            nameEn: body.nameEn,
             id: { not: id },
           },
         });
@@ -196,7 +198,8 @@ export const keywordCategories = new Elysia({
       const category = await prisma.keywordCategory.update({
         where: { id },
         data: {
-          name: body.name,
+          nameEn: body.nameEn,
+          nameAr: body.nameAr,
           color: body.color,
         },
       });
@@ -208,7 +211,8 @@ export const keywordCategories = new Elysia({
         id: t.String({ format: 'uuid' }),
       }),
       body: t.Object({
-        name: t.String({ minLength: 1 }),
+        nameEn: t.Optional(t.String()),
+        nameAr: t.Optional(t.String()),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
       }),
       response: {

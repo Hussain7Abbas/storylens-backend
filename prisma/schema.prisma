@@ -176,7 +176,8 @@ model Chapter {
 model KeywordCategory{
   id String @id @default(uuid())
 
-  name String
+  nameEn String?
+  nameAr String?
   color String
 
   // Metadata
@@ -190,7 +191,8 @@ model KeywordCategory{
 model KeywordNature{
   id String @id @default(uuid())
 
-  name String
+  nameEn String?
+  nameAr String?
   color String
 
   // Metadata
