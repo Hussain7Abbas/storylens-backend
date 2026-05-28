@@ -459,9 +459,10 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				});
 			}
 
-			await prisma.keyword.delete({
-				where: { id },
-			});
+			await prisma.$transaction([
+				prisma.keywordsChapters.deleteMany({ where: { keywordId: id } }),
+				prisma.keyword.delete({ where: { id } }),
+			]);
 
 			return existingKeyword;
 		},
