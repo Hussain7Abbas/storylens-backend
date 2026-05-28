@@ -11,6 +11,7 @@ import { keywords } from "./routes/keywords";
 import { keywordsChapters } from "./routes/keywords-chapters";
 import { novels } from "./routes/novels";
 import { replacements } from "./routes/replacements";
+import { websiteNovelBiases } from "./routes/website-novel-biases";
 import { websiteSelectors } from "./routes/website-selectors";
 import { errorSchema } from "./schemas/common";
 import { AuthError, HttpError } from "./utils/errors";
@@ -76,6 +77,7 @@ export const app = new Elysia()
 	.use(accounts)
 	.use(configs)
 	.use(websiteSelectors)
+	.use(websiteNovelBiases)
 	.use(novels)
 	.use(chapters)
 	.use(keywords)

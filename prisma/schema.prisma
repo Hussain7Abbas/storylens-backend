@@ -148,9 +148,10 @@ model Novel {
   updatedAt DateTime @updatedAt
 
   // Relations
-  Keywords Keyword[] @relation("NovelKeywords") 
+  Keywords Keyword[] @relation("NovelKeywords")
   chapters Chapter[] @relation("NovelChapters")
   replacements Replacement[] @relation("NovelReplacements")
+  biases WebsiteNovelBias[]
 }
 
 model Chapter {
@@ -310,5 +311,26 @@ model WebsiteSelector {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  biases WebsiteNovelBias[]
+
   @@index([website])
+}
+
+model WebsiteNovelBias {
+  id String @id @default(uuid())
+
+  websiteSelectorId String
+  websiteSelector   WebsiteSelector @relation(fields: [websiteSelectorId], references: [id], onDelete: Cascade)
+
+  novelId String
+  novel   Novel @relation(fields: [novelId], references: [id], onDelete: Cascade)
+
+  biasValue Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([websiteSelectorId, novelId])
+  @@index([novelId])
+  @@index([websiteSelectorId])
 }
