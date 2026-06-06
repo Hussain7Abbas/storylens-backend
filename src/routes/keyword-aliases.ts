@@ -1,11 +1,19 @@
 import { Elysia, t } from "elysia";
-import { KeywordAliasPlain, MatchingType } from "@/lib/db";
+import { KeywordAliasPlain, KeywordCategoryPlain, KeywordNaturePlain, MatchingType } from "@/lib/db";
 import { assertOwnsResource, shouldBeGuest, shouldBeUser } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
 import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
 import { sanitizeObject } from "@/utils/sanitize";
+
+const aliasInclude = { category: true, nature: true } as const;
+
+const aliasWithStyleShape = t.Object({
+	...KeywordAliasPlain.properties,
+	category: t.Nullable(KeywordCategoryPlain),
+	nature: t.Nullable(KeywordNaturePlain),
+});
 
 export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["Keywords"] })
 	.use(setup)
@@ -22,6 +30,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 			const [aliases, total] = await Promise.all([
 				prisma.keywordAlias.findMany({
 					where,
+					include: aliasInclude,
 					skip,
 					take,
 					orderBy: getNestedColumnObject(sorting?.column, sorting?.direction),
@@ -43,7 +52,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 			}),
 			response: {
 				200: t.Object({
-					data: t.Array(KeywordAliasPlain),
+					data: t.Array(aliasWithStyleShape),
 					total: t.Number(),
 				}),
 			},
@@ -75,9 +84,13 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 					name,
 					description: sanitizedBody.description ?? null,
 					matchingType: sanitizedBody.matchingType ?? "FULL",
+					categoryId: sanitizedBody.categoryId ?? null,
+					natureId: sanitizedBody.natureId ?? null,
+					overrideStyle: sanitizedBody.overrideStyle ?? false,
 					keywordId,
 					createdById: authedUser.id,
 				},
+				include: aliasInclude,
 			});
 
 			return alias;
@@ -88,8 +101,11 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				name: t.String({ minLength: 1 }),
 				description: t.Optional(t.String()),
 				matchingType: t.Optional(MatchingType),
+				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+				overrideStyle: t.Optional(t.Boolean()),
 			}),
-			response: { 200: KeywordAliasPlain },
+			response: { 200: aliasWithStyleShape },
 		},
 	)
 
@@ -126,7 +142,11 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 					name: sanitizedBody.name,
 					description: sanitizedBody.description,
 					matchingType: sanitizedBody.matchingType,
+					categoryId: sanitizedBody.categoryId,
+					natureId: sanitizedBody.natureId,
+					overrideStyle: sanitizedBody.overrideStyle,
 				},
+				include: aliasInclude,
 			});
 
 			return alias;
@@ -137,8 +157,11 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				name: t.Optional(t.String({ minLength: 1 })),
 				description: t.Optional(t.String()),
 				matchingType: t.Optional(MatchingType),
+				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+				overrideStyle: t.Optional(t.Boolean()),
 			}),
-			response: { 200: KeywordAliasPlain },
+			response: { 200: aliasWithStyleShape },
 		},
 	)
 
@@ -165,3 +188,6 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 			response: { 200: KeywordAliasPlain },
 		},
 	);
+
+// Re-export for use in keywords.ts response shape
+export { aliasWithStyleShape };

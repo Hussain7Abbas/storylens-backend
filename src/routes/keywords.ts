@@ -26,12 +26,14 @@ import { orderByIds, queryWeightedSearchIds } from "@/utils/weighted-search";
 
 const aliasShape = t.Object({
 	...KeywordAliasPlain.properties,
+	category: t.Nullable(KeywordCategoryPlain),
+	nature: t.Nullable(KeywordNaturePlain),
 });
 
 const versionShape = t.Object({
 	...KeywordVersionPlain.properties,
-	category: KeywordCategoryPlain,
-	nature: KeywordNaturePlain,
+	category: t.Nullable(KeywordCategoryPlain),
+	nature: t.Nullable(KeywordNaturePlain),
 	image: t.Nullable(FilePlain),
 });
 
@@ -49,8 +51,13 @@ const versionInclude = {
 	image: true,
 } as const;
 
+const aliasInclude = { category: true, nature: true } as const;
+
 const keywordInclude = {
-	aliases: { orderBy: { createdAt: "asc" as const } },
+	aliases: {
+		include: aliasInclude,
+		orderBy: { createdAt: "asc" as const },
+	},
 	versions: {
 		include: versionInclude,
 		orderBy: { startingChapter: "asc" as const },

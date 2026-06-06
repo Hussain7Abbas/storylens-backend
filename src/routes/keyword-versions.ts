@@ -9,8 +9,8 @@ import { sanitizeObject } from "@/utils/sanitize";
 
 const versionWithRelationsShape = t.Object({
 	...KeywordVersionPlain.properties,
-	category: KeywordCategoryPlain,
-	nature: KeywordNaturePlain,
+	category: t.Nullable(KeywordCategoryPlain),
+	nature: t.Nullable(KeywordNaturePlain),
 	image: t.Nullable(FilePlain),
 });
 
@@ -70,17 +70,19 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 		"/",
 		async ({ t, prisma, body, authedUser }) => {
 			const sanitizedBody = sanitizeObject(body);
-			const { keywordId, categoryId, natureId } = sanitizedBody;
+			const { keywordId } = sanitizedBody;
+			const categoryId = sanitizedBody.categoryId ?? null;
+			const natureId = sanitizedBody.natureId ?? null;
 
 			const [keyword, category, nature] = await Promise.all([
 				prisma.keyword.findUnique({ where: { id: keywordId } }),
-				prisma.keywordCategory.findUnique({ where: { id: categoryId } }),
-				prisma.keywordNature.findUnique({ where: { id: natureId } }),
+				categoryId ? prisma.keywordCategory.findUnique({ where: { id: categoryId } }) : Promise.resolve(null),
+				natureId ? prisma.keywordNature.findUnique({ where: { id: natureId } }) : Promise.resolve(null),
 			]);
 
 			if (!keyword) throw new HttpError({ statusCode: 404, message: t({ en: "Keyword not found", ar: "الكلمة المفتاحية غير موجودة" }) });
-			if (!category) throw new HttpError({ statusCode: 404, message: t({ en: "Category not found", ar: "الفئة غير موجودة" }) });
-			if (!nature) throw new HttpError({ statusCode: 404, message: t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }) });
+			if (categoryId && !category) throw new HttpError({ statusCode: 404, message: t({ en: "Category not found", ar: "الفئة غير موجودة" }) });
+			if (natureId && !nature) throw new HttpError({ statusCode: 404, message: t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }) });
 
 			const latestVersion = await prisma.keywordVersion.findFirst({
 				where: { keywordId, endingChapter: null },
@@ -138,8 +140,8 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 		{
 			body: t.Object({
 				keywordId: t.String({ format: "uuid" }),
-				categoryId: t.String({ format: "uuid" }),
-				natureId: t.String({ format: "uuid" }),
+				categoryId: t.Optional(t.String({ format: "uuid" })),
+				natureId: t.Optional(t.String({ format: "uuid" })),
 				description: t.Optional(t.String()),
 				imageId: t.Optional(t.String({ format: "uuid" })),
 				currentChapter: t.Optional(t.Number({ minimum: 0 })),
@@ -227,10 +229,25 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 
 			assertOwnsResource(existing.keyword.createdById, authedUser);
 
-			const versionCount = await prisma.keywordVersion.count({ where: { keywordId: existing.keywordId } });
+			const [versionCount, baseVersion] = await Promise.all([
+				prisma.keywordVersion.count({ where: { keywordId: existing.keywordId } }),
+				prisma.keywordVersion.findFirst({
+					where: { keywordId: existing.keywordId },
+					orderBy: { startingChapter: "asc" },
+					select: { id: true },
+				}),
+			]);
+
 			if (versionCount <= 1) {
 				throw new HttpError({
 					message: t({ en: "Cannot delete the only version of a keyword", ar: "لا يمكن حذف النسخة الوحيدة للكلمة المفتاحية" }),
+				});
+			}
+
+			if (baseVersion?.id === id) {
+				throw new HttpError({
+					statusCode: 400,
+					message: t({ en: "Cannot delete the base version of a keyword", ar: "لا يمكن حذف النسخة الأساسية للكلمة المفتاحية" }),
 				});
 			}
 

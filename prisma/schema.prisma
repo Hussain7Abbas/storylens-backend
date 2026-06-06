@@ -189,6 +189,7 @@ model KeywordCategory {
 
   // Relations
   keywordVersions KeywordVersion[] @relation("KeywordVersionCategories")
+  keywordAliases  KeywordAlias[]   @relation("KeywordAliasCategories")
 }
 
 model KeywordNature {
@@ -204,6 +205,7 @@ model KeywordNature {
 
   // Relations
   keywordVersions KeywordVersion[] @relation("KeywordVersionNatures")
+  keywordAliases  KeywordAlias[]   @relation("KeywordAliasNatures")
 }
 
 model Keyword {
@@ -232,10 +234,17 @@ model Keyword {
 }
 
 model KeywordAlias {
-  id           String       @id @default(uuid())
-  name         String
-  description  String?
-  matchingType MatchingType @default(FULL)
+  id            String       @id @default(uuid())
+  name          String
+  description   String?
+  matchingType  MatchingType @default(FULL)
+  overrideStyle Boolean      @default(false)
+
+  categoryId String?
+  category   KeywordCategory? @relation(fields: [categoryId], references: [id], name: "KeywordAliasCategories")
+
+  natureId String?
+  nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordAliasNatures")
 
   keywordId String
   keyword   Keyword @relation(fields: [keywordId], references: [id], name: "KeywordAliases", onDelete: Cascade)
@@ -257,11 +266,11 @@ model KeywordVersion {
   startingChapter Int
   endingChapter   Int?
 
-  categoryId String
-  category   KeywordCategory @relation(fields: [categoryId], references: [id], name: "KeywordVersionCategories")
+  categoryId String?
+  category   KeywordCategory? @relation(fields: [categoryId], references: [id], name: "KeywordVersionCategories")
 
-  natureId String
-  nature   KeywordNature @relation(fields: [natureId], references: [id], name: "KeywordVersionNatures")
+  natureId String?
+  nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordVersionNatures")
 
   imageId String?
   image   File?   @relation(fields: [imageId], references: [id], name: "KeywordVersionImages")
