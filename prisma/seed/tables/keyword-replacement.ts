@@ -18,6 +18,7 @@ export async function seedKeywordReplacement(prisma: PrismaClient) {
   const keywordByNovelAndName = new Map<string, string>();
 
   for (const keyword of keywords) {
+    if (!keyword.name) continue;
     keywordByNovelAndName.set(
       `${keyword.novelId}:${keyword.name.trim()}`,
       keyword.id,

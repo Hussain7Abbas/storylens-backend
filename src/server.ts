@@ -7,6 +7,8 @@ import { configs } from "./routes/configs";
 import { files } from "./routes/files";
 import { keywordCategories } from "./routes/keyword-categories";
 import { keywordNatures } from "./routes/keyword-natures";
+import { keywordAliases } from "./routes/keyword-aliases";
+import { keywordVersions } from "./routes/keyword-versions";
 import { keywords } from "./routes/keywords";
 import { keywordsChapters } from "./routes/keywords-chapters";
 import { novels } from "./routes/novels";
@@ -81,6 +83,8 @@ export const app = new Elysia()
 	.use(novels)
 	.use(chapters)
 	.use(keywords)
+	.use(keywordAliases)
+	.use(keywordVersions)
 	.use(replacements)
 	.use(keywordsChapters)
 	.use(keywordCategories)

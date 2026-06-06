@@ -1,7 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
 import {
-  KeywordCategoryPlain,
-  KeywordNaturePlain,
   KeywordPlain,
   MatchingType,
   ReplacementPlain,
@@ -129,12 +127,7 @@ export const replacements = new Elysia({
       const replacement = await prisma.replacement.findUnique({
         where: { id },
         include: {
-          keyword: {
-            include: {
-              category: true,
-              nature: true,
-            },
-          },
+          keyword: true,
         },
       });
 
@@ -158,15 +151,7 @@ export const replacements = new Elysia({
         200: t.Composite([
           ReplacementPlain,
           t.Object({
-            keyword: t.Nullable(
-              t.Composite([
-                KeywordPlain,
-                t.Object({
-                  category: KeywordCategoryPlain,
-                  nature: KeywordNaturePlain,
-                }),
-              ]),
-            ),
+            keyword: t.Nullable(KeywordPlain),
           }),
         ]),
       },

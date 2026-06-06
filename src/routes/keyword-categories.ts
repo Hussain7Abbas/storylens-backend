@@ -1,4 +1,4 @@
-import { KeywordCategoryPlain, KeywordNaturePlain, KeywordPlain } from '@/lib/db';
+import { KeywordCategoryPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
 import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
@@ -23,13 +23,6 @@ export const keywordCategories = new Elysia({
         prisma.keywordCategory.findMany({
           skip,
           take,
-          include: {
-            _count: {
-              select: {
-                keywords: true,
-              },
-            },
-          },
           orderBy: getNestedColumnObject(sorting?.column, sorting?.direction),
         }),
         prisma.keywordCategory.count(),
@@ -61,18 +54,9 @@ export const keywordCategories = new Elysia({
       const category = await prisma.keywordCategory.findUnique({
         where: { id },
         include: {
-          keywords: {
-            include: {
-              nature: true,
-            },
-            take: 10,
-            orderBy: {
-              createdAt: 'desc',
-            },
-          },
           _count: {
             select: {
-              keywords: true,
+              keywordVersions: true,
             },
           },
         },
@@ -98,16 +82,8 @@ export const keywordCategories = new Elysia({
         200: t.Composite([
           KeywordCategoryPlain,
           t.Object({
-            keywords: t.Array(
-              t.Composite([
-                KeywordPlain,
-                t.Object({
-                  nature: KeywordNaturePlain,
-                }),
-              ]),
-            ),
             _count: t.Object({
-              keywords: t.Number(),
+              keywordVersions: t.Number(),
             }),
           }),
         ]),
@@ -230,7 +206,7 @@ export const keywordCategories = new Elysia({
         include: {
           _count: {
             select: {
-              keywords: true,
+              keywordVersions: true,
             },
           },
         },
@@ -246,8 +222,8 @@ export const keywordCategories = new Elysia({
         });
       }
 
-      // Check if category has keywords
-      if (existingCategory._count.keywords > 0) {
+      // Check if category has keyword versions
+      if (existingCategory._count.keywordVersions > 0) {
         throw new HttpError({
           message: t({
             en: 'Cannot delete category with keywords',

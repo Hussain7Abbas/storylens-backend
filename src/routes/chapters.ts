@@ -1,8 +1,5 @@
 import {
   ChapterPlain,
-  FilePlain,
-  KeywordCategoryPlain,
-  KeywordNaturePlain,
   KeywordPlain,
   KeywordsChaptersPlain,
   NovelPlain,
@@ -88,13 +85,7 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
           novel: true,
           KeywordsChapters: {
             include: {
-              keyword: {
-                include: {
-                  category: true,
-                  nature: true,
-                  image: true,
-                },
-              },
+              keyword: true,
             },
           },
         },
@@ -125,14 +116,7 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
               t.Composite([
                 KeywordsChaptersPlain,
                 t.Object({
-                  keyword: t.Composite([
-                    KeywordPlain,
-                    t.Object({
-                      category: KeywordCategoryPlain,
-                      nature: KeywordNaturePlain,
-                      image: t.Nullable(FilePlain),
-                    }),
-                  ]),
+                  keyword: KeywordPlain,
                 }),
               ]),
             ),

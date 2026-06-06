@@ -1,8 +1,5 @@
 import {
   ChapterPlain,
-  FilePlain,
-  KeywordCategoryPlain,
-  KeywordNaturePlain,
   KeywordPlain,
   KeywordsChaptersPlain,
   NovelPlain,
@@ -48,13 +45,7 @@ export const keywordsChapters = new Elysia({
           skip,
           take,
           include: {
-            keyword: {
-              include: {
-                category: true,
-                nature: true,
-                image: true,
-              },
-            },
+            keyword: true,
             chapter: true,
           },
           orderBy: getNestedColumnObject(sorting?.column, sorting?.direction),
@@ -154,13 +145,7 @@ export const keywordsChapters = new Elysia({
       const relationship = await prisma.keywordsChapters.findUnique({
         where: { id },
         include: {
-          keyword: {
-            include: {
-              category: true,
-              nature: true,
-              image: true,
-            },
-          },
+          keyword: true,
           chapter: {
             include: {
               novel: true,
@@ -189,14 +174,7 @@ export const keywordsChapters = new Elysia({
         200: t.Composite([
           KeywordsChaptersPlain,
           t.Object({
-            keyword: t.Composite([
-              KeywordPlain,
-              t.Object({
-                category: KeywordCategoryPlain,
-                nature: KeywordNaturePlain,
-                image: t.Nullable(FilePlain),
-              }),
-            ]),
+            keyword: KeywordPlain,
             chapter: t.Composite([
               ChapterPlain,
               t.Object({
