@@ -54,12 +54,14 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  uploads      File[]
-  novels       Novel[]       @relation("NovelCreator")
-  keywords     Keyword[]     @relation("KeywordCreator")
-  replacements Replacement[] @relation("ReplacementCreator")
-  sessions     Session[]
-  accounts     Account[]
+  uploads         File[]
+  novels          Novel[]          @relation("NovelCreator")
+  keywords        Keyword[]        @relation("KeywordCreator")
+  keywordAliases  KeywordAlias[]   @relation("KeywordAliasCreator")
+  keywordVersions KeywordVersion[] @relation("KeywordVersionCreator")
+  replacements    Replacement[]    @relation("ReplacementCreator")
+  sessions        Session[]
+  accounts        Account[]
 }
 
 model Session {
@@ -125,9 +127,10 @@ model File {
   updatedAt DateTime @updatedAt
 
   // Relations
-  users  User[]  @relation("UserAvatars")
-  novels Novel[] @relation("NovelImages")
-  Keywords Keyword[] @relation("KeywordImages")
+  users           User[]           @relation("UserAvatars")
+  novels          Novel[]          @relation("NovelImages")
+  keywordVersions KeywordVersion[] @relation("KeywordVersionImages")
+  keywordAliases  KeywordAlias[]   @relation("KeywordAliasImages")
 }
 
 model Novel {
@@ -148,9 +151,10 @@ model Novel {
   updatedAt DateTime @updatedAt
 
   // Relations
-  Keywords Keyword[] @relation("NovelKeywords") 
+  Keywords Keyword[] @relation("NovelKeywords")
   chapters Chapter[] @relation("NovelChapters")
   replacements Replacement[] @relation("NovelReplacements")
+  biases WebsiteNovelBias[]
 }
 
 model Chapter {
@@ -173,57 +177,45 @@ model Chapter {
   @@index([novelId])
 }
 
-model KeywordCategory{
+model KeywordCategory {
   id String @id @default(uuid())
 
   nameEn String?
   nameAr String?
-  color String
+  color  String
 
   // Metadata
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  keywords Keyword[] @relation("KeywordCategories")
+  keywordVersions KeywordVersion[] @relation("KeywordVersionCategories")
+  keywordAliases  KeywordAlias[]   @relation("KeywordAliasCategories")
 }
 
-model KeywordNature{
+model KeywordNature {
   id String @id @default(uuid())
 
   nameEn String?
   nameAr String?
-  color String
+  color  String
 
   // Metadata
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  keywords Keyword[] @relation("KeywordNatures")
+  keywordVersions KeywordVersion[] @relation("KeywordVersionNatures")
+  keywordAliases  KeywordAlias[]   @relation("KeywordAliasNatures")
 }
 
 model Keyword {
-  id String @id @default(uuid())
-
-  name String
-  description String
+  id           String       @id @default(uuid())
+  name         String
   matchingType MatchingType @default(FULL)
 
-  categoryId String
-  category KeywordCategory @relation(fields: [categoryId], references: [id], name: "KeywordCategories")
-
-  natureId String
-  nature KeywordNature @relation(fields: [natureId], references: [id], name: "KeywordNatures")
-
-  imageId String?
-  image File? @relation(fields: [imageId], references: [id], name: "KeywordImages")
-
-  parentId String?
-  parent Keyword? @relation(fields: [parentId], references: [id], name: "KeywordParents")
-
   novelId String
-  novel Novel @relation(fields: [novelId], references: [id], name: "NovelKeywords", onDelete: Cascade)
+  novel   Novel  @relation(fields: [novelId], references: [id], name: "NovelKeywords", onDelete: Cascade)
 
   createdById String?
   createdBy   User?   @relation(fields: [createdById], references: [id], name: "KeywordCreator")
@@ -233,12 +225,72 @@ model Keyword {
   updatedAt DateTime @updatedAt
 
   // Relations
-  children Keyword[] @relation("KeywordParents")
+  aliases          KeywordAlias[]     @relation("KeywordAliases")
+  versions         KeywordVersion[]   @relation("KeywordVersions")
   KeywordsChapters KeywordsChapters[] @relation("KeywordsChapters")
-  replacements Replacement[] @relation("KeywordReplacements")
+  replacements     Replacement[]      @relation("KeywordReplacements")
 
   @@unique([name, novelId])
   @@index([name])
+}
+
+model KeywordAlias {
+  id            String       @id @default(uuid())
+  name          String
+  description   String?
+  matchingType  MatchingType @default(FULL)
+  overrideStyle Boolean      @default(false)
+
+  categoryId String?
+  category   KeywordCategory? @relation(fields: [categoryId], references: [id], name: "KeywordAliasCategories")
+
+  natureId String?
+  nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordAliasNatures")
+
+  imageId String?
+  image   File?   @relation(fields: [imageId], references: [id], name: "KeywordAliasImages")
+
+  keywordId String
+  keyword   Keyword @relation(fields: [keywordId], references: [id], name: "KeywordAliases", onDelete: Cascade)
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], name: "KeywordAliasCreator")
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([keywordId, name])
+  @@index([keywordId])
+}
+
+model KeywordVersion {
+  id              String  @id @default(uuid())
+  description     String?
+  startingChapter Int
+  endingChapter   Int?
+
+  categoryId String?
+  category   KeywordCategory? @relation(fields: [categoryId], references: [id], name: "KeywordVersionCategories")
+
+  natureId String?
+  nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordVersionNatures")
+
+  imageId String?
+  image   File?   @relation(fields: [imageId], references: [id], name: "KeywordVersionImages")
+
+  keywordId String
+  keyword   Keyword @relation(fields: [keywordId], references: [id], name: "KeywordVersions", onDelete: Cascade)
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], name: "KeywordVersionCreator")
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([keywordId, startingChapter])
+  @@index([keywordId])
 }
 
 model KeywordsChapters{
@@ -310,5 +362,26 @@ model WebsiteSelector {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  biases WebsiteNovelBias[]
+
   @@index([website])
+}
+
+model WebsiteNovelBias {
+  id String @id @default(uuid())
+
+  websiteSelectorId String
+  websiteSelector   WebsiteSelector @relation(fields: [websiteSelectorId], references: [id], onDelete: Cascade)
+
+  novelId String
+  novel   Novel @relation(fields: [novelId], references: [id], onDelete: Cascade)
+
+  biasValue Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([websiteSelectorId, novelId])
+  @@index([novelId])
+  @@index([websiteSelectorId])
 }

@@ -14,6 +14,7 @@ interface WeightedSearchFilters {
   categoryId?: string;
   natureId?: string;
   keywordId?: string;
+  type?: string;
 }
 
 interface WeightedSearchParams {
@@ -70,6 +71,10 @@ export async function queryWeightedSearchIds(
 
   if (params.filters.keywordId) {
     filterSql.push(Prisma.sql`"keywordId" = ${params.filters.keywordId}`);
+  }
+
+  if (params.filters.type) {
+    filterSql.push(Prisma.sql`"type" = ${params.filters.type}::"KeywordType"`);
   }
 
   filterSql.push(

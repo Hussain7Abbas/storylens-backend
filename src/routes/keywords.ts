@@ -1,10 +1,12 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t, type Static } from "elysia";
 import {
 	ChapterPlain,
 	FilePlain,
+	KeywordAliasPlain,
 	KeywordCategoryPlain,
 	KeywordNaturePlain,
 	KeywordPlain,
+	KeywordVersionPlain,
 	KeywordsChaptersPlain,
 	MatchingType,
 	NovelPlain,
@@ -22,11 +24,45 @@ import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
 import { sanitizeObject } from "@/utils/sanitize";
 import { orderByIds, queryWeightedSearchIds } from "@/utils/weighted-search";
 
-const keywordInclude = {
+const aliasShape = t.Object({
+	...KeywordAliasPlain.properties,
+	category: t.Nullable(KeywordCategoryPlain),
+	nature: t.Nullable(KeywordNaturePlain),
+	image: t.Nullable(FilePlain),
+});
+
+const versionShape = t.Object({
+	...KeywordVersionPlain.properties,
+	category: t.Nullable(KeywordCategoryPlain),
+	nature: t.Nullable(KeywordNaturePlain),
+	image: t.Nullable(FilePlain),
+});
+
+const keywordWithChildrenShape = t.Object({
+	...KeywordPlain.properties,
+	aliases: t.Array(aliasShape),
+	versions: t.Array(versionShape),
+});
+
+type KeywordWithChildren = Static<typeof keywordWithChildrenShape>;
+
+const versionInclude = {
 	category: true,
 	nature: true,
 	image: true,
-	parent: true,
+} as const;
+
+const aliasInclude = { category: true, nature: true, image: true } as const;
+
+const keywordInclude = {
+	aliases: {
+		include: aliasInclude,
+		orderBy: { createdAt: "asc" as const },
+	},
+	versions: {
+		include: versionInclude,
+		orderBy: { startingChapter: "asc" as const },
+	},
 } as const;
 
 export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
@@ -42,11 +78,11 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			const where: Record<string, unknown> = {};
 
 			if (query?.categoryId) {
-				where.categoryId = query.categoryId;
+				where.versions = { some: { categoryId: query.categoryId } };
 			}
 
 			if (query?.natureId) {
-				where.natureId = query.natureId;
+				where.versions = { some: { natureId: query.natureId } };
 			}
 
 			if (query?.novelId) {
@@ -57,12 +93,10 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				const { ids, total } = await queryWeightedSearchIds(prisma, {
 					table: "Keyword",
 					primaryColumn: "name",
-					secondaryColumn: "description",
+					secondaryColumn: "name",
 					search: query.search,
 					filters: {
 						novelId: query.novelId,
-						categoryId: query.categoryId,
-						natureId: query.natureId,
 					},
 					skip: skip ?? 0,
 					take: take ?? 25,
@@ -71,24 +105,21 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				});
 
 				if (ids.length === 0) {
-					return {
-						data: [],
-						total,
-					};
+					return { data: [], total };
 				}
 
-				const keywords = await prisma.keyword.findMany({
+				const kws = await prisma.keyword.findMany({
 					where: { id: { in: ids } },
 					include: keywordInclude,
 				});
 
 				return {
-					data: orderByIds(keywords, ids),
+					data: orderByIds(kws, ids) as unknown as KeywordWithChildren[],
 					total,
 				};
 			}
 
-			const [keywords, total] = await Promise.all([
+			const [kws, total] = await Promise.all([
 				prisma.keyword.findMany({
 					where,
 					skip,
@@ -99,10 +130,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				prisma.keyword.count({ where }),
 			]);
 
-			return {
-				data: keywords,
-				total,
-			};
+			return { data: kws as unknown as KeywordWithChildren[], total };
 		},
 		{
 			query: t.Object({
@@ -119,17 +147,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			}),
 			response: {
 				200: t.Object({
-					data: t.Array(
-						t.Composite([
-							KeywordPlain,
-							t.Object({
-								category: KeywordCategoryPlain,
-								nature: KeywordNaturePlain,
-								image: t.Nullable(FilePlain),
-								parent: t.Nullable(KeywordPlain),
-							}),
-						]),
-					),
+					data: t.Array(keywordWithChildrenShape),
 					total: t.Number(),
 				}),
 			},
@@ -143,22 +161,9 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			const keyword = await prisma.keyword.findUnique({
 				where: { id },
 				include: {
-					category: true,
-					nature: true,
-					image: true,
-					parent: true,
-					children: {
-						include: {
-							category: true,
-							nature: true,
-						},
-					},
+					...keywordInclude,
 					novel: true,
-					KeywordsChapters: {
-						include: {
-							chapter: true,
-						},
-					},
+					KeywordsChapters: { include: { chapter: true } },
 					replacements: true,
 				},
 			});
@@ -181,28 +186,13 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			}),
 			response: {
 				200: t.Composite([
-					KeywordPlain,
+					keywordWithChildrenShape,
 					t.Object({
-						category: KeywordCategoryPlain,
-						nature: KeywordNaturePlain,
-						image: t.Nullable(FilePlain),
-						parent: t.Nullable(KeywordPlain),
-						children: t.Array(
-							t.Composite([
-								KeywordPlain,
-								t.Object({
-									category: KeywordCategoryPlain,
-									nature: KeywordNaturePlain,
-								}),
-							]),
-						),
 						novel: t.Nullable(NovelPlain),
 						KeywordsChapters: t.Array(
 							t.Composite([
 								KeywordsChaptersPlain,
-								t.Object({
-									chapter: ChapterPlain,
-								}),
+								t.Object({ chapter: ChapterPlain }),
 							]),
 						),
 						replacements: t.Array(ReplacementPlain),
@@ -218,92 +208,68 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 		"/",
 		async ({ t, prisma, body, authedUser }) => {
 			const sanitizedBody = sanitizeObject(body);
+			const { name, novelId, categoryId, natureId } = sanitizedBody;
 
 			const [category, nature, novel] = await Promise.all([
-				prisma.keywordCategory.findUnique({
-					where: { id: sanitizedBody.categoryId },
-				}),
-				prisma.keywordNature.findUnique({
-					where: { id: sanitizedBody.natureId },
-				}),
-				prisma.novel.findUnique({ where: { id: sanitizedBody.novelId } }),
+				prisma.keywordCategory.findUnique({ where: { id: categoryId } }),
+				prisma.keywordNature.findUnique({ where: { id: natureId } }),
+				prisma.novel.findUnique({ where: { id: novelId } }),
 			]);
 
-			if (!category) {
+			if (!category) throw new HttpError({ statusCode: 404, message: t({ en: "Category not found", ar: "الفئة غير موجودة" }) });
+			if (!nature) throw new HttpError({ statusCode: 404, message: t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }) });
+			if (!novel) throw new HttpError({ statusCode: 404, message: t({ en: "Novel not found", ar: "الرواية غير موجودة" }) });
+
+			const existing = await prisma.keyword.findFirst({ where: { name, novelId } });
+			if (existing) {
 				throw new HttpError({
-					statusCode: 404,
-					message: t({ en: "Category not found", ar: "الفئة غير موجودة" }),
+					message: t({ en: "Keyword name already exists for this novel", ar: "اسم الكلمة المفتاحية موجود بالفعل لهذه الرواية" }),
 				});
 			}
 
-			if (!nature) {
-				throw new HttpError({
-					statusCode: 404,
-					message: t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }),
+			const keyword = await prisma.$transaction(async (tx) => {
+				const kw = await tx.keyword.create({
+					data: {
+						name,
+						matchingType: sanitizedBody.matchingType ?? "FULL",
+						novelId,
+						createdById: authedUser.id,
+					},
 				});
-			}
 
-			if (!novel) {
-				throw new HttpError({
-					statusCode: 404,
-					message: t({ en: "Novel not found", ar: "الرواية غير موجودة" }),
+				await tx.keywordVersion.create({
+					data: {
+						description: sanitizedBody.description ?? null,
+						categoryId,
+						natureId,
+						imageId: sanitizedBody.imageId ?? null,
+						keywordId: kw.id,
+						startingChapter: 0,
+						endingChapter: null,
+						createdById: authedUser.id,
+					},
 				});
-			}
 
-			const existingKeyword = await prisma.keyword.findFirst({
-				where: {
-					name: sanitizedBody.name,
-					novelId: sanitizedBody.novelId,
-				},
+				return tx.keyword.findUniqueOrThrow({
+					where: { id: kw.id },
+					include: keywordInclude,
+				});
 			});
 
-			if (existingKeyword) {
-				throw new HttpError({
-					message: t({
-						en: "Keyword name already exists for this novel",
-						ar: "اسم الكلمة المفتاحية موجود بالفعل لهذه الرواية",
-					}),
-				});
-			}
-
-			const keyword = await prisma.keyword.create({
-				data: {
-					name: sanitizedBody.name,
-					description: sanitizedBody.description,
-					matchingType: sanitizedBody.matchingType ?? "FULL",
-					categoryId: sanitizedBody.categoryId,
-					natureId: sanitizedBody.natureId,
-					imageId: sanitizedBody.imageId,
-					parentId: sanitizedBody.parentId,
-					novelId: sanitizedBody.novelId,
-					createdById: authedUser.id,
-				},
-				include: keywordInclude,
-			});
-
-			return keyword;
+			return keyword as unknown as KeywordWithChildren;
 		},
 		{
 			body: t.Object({
 				name: t.String({ minLength: 1 }),
-				description: t.String({ minLength: 1 }),
+				description: t.Optional(t.String()),
 				matchingType: t.Optional(MatchingType),
+				novelId: t.String({ format: "uuid" }),
 				categoryId: t.String({ format: "uuid" }),
 				natureId: t.String({ format: "uuid" }),
 				imageId: t.Optional(t.String({ format: "uuid" })),
-				parentId: t.Optional(t.String({ format: "uuid" })),
-				novelId: t.String({ format: "uuid" }),
 			}),
 			response: {
-				200: t.Composite([
-					KeywordPlain,
-					t.Object({
-						category: KeywordCategoryPlain,
-						nature: KeywordNaturePlain,
-						image: t.Nullable(FilePlain),
-						parent: t.Nullable(KeywordPlain),
-					}),
-				]),
+				200: keywordWithChildrenShape,
 			},
 		},
 	)
@@ -312,17 +278,12 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 	.put(
 		"/:id",
 		async ({ t, prisma, params: { id }, body, authedUser }) => {
-			const existingKeyword = await prisma.keyword.findUnique({
-				where: { id },
-			});
+			const existingKeyword = await prisma.keyword.findUnique({ where: { id } });
 
 			if (!existingKeyword) {
 				throw new HttpError({
 					statusCode: 404,
-					message: t({
-						en: "Keyword not found",
-						ar: "الكلمة المفتاحية غير موجودة",
-					}),
+					message: t({ en: "Keyword not found", ar: "الكلمة المفتاحية غير موجودة" }),
 				});
 			}
 
@@ -331,49 +292,12 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			const sanitizedBody = sanitizeObject(body);
 
 			if (sanitizedBody.name && sanitizedBody.name !== existingKeyword.name) {
-				const conflictKeyword = await prisma.keyword.findFirst({
-					where: {
-						name: sanitizedBody.name,
-						novelId: existingKeyword.novelId,
-						id: { not: id },
-					},
+				const conflict = await prisma.keyword.findFirst({
+					where: { name: sanitizedBody.name, novelId: existingKeyword.novelId, id: { not: id } },
 				});
-
-				if (conflictKeyword) {
+				if (conflict) {
 					throw new HttpError({
-						message: t({
-							en: "Keyword name already exists for this novel",
-							ar: "اسم الكلمة المفتاحية موجود بالفعل لهذه الرواية",
-						}),
-					});
-				}
-			}
-
-			if (sanitizedBody.categoryId || sanitizedBody.natureId) {
-				const [category, nature] = await Promise.all([
-					sanitizedBody.categoryId
-						? prisma.keywordCategory.findUnique({
-								where: { id: sanitizedBody.categoryId },
-							})
-						: Promise.resolve(null),
-					sanitizedBody.natureId
-						? prisma.keywordNature.findUnique({
-								where: { id: sanitizedBody.natureId },
-							})
-						: Promise.resolve(null),
-				]);
-
-				if (sanitizedBody.categoryId && !category) {
-					throw new HttpError({
-						statusCode: 404,
-						message: t({ en: "Category not found", ar: "الفئة غير موجودة" }),
-					});
-				}
-
-				if (sanitizedBody.natureId && !nature) {
-					throw new HttpError({
-						statusCode: 404,
-						message: t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }),
+						message: t({ en: "Keyword name already exists for this novel", ar: "اسم الكلمة المفتاحية موجود بالفعل لهذه الرواية" }),
 					});
 				}
 			}
@@ -382,41 +306,23 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				where: { id },
 				data: {
 					name: sanitizedBody.name,
-					description: sanitizedBody.description,
 					matchingType: sanitizedBody.matchingType,
-					categoryId: sanitizedBody.categoryId,
-					natureId: sanitizedBody.natureId,
-					imageId: sanitizedBody.imageId,
-					parentId: sanitizedBody.parentId,
 				},
 				include: keywordInclude,
 			});
 
-			return keyword;
+			return keyword as unknown as KeywordWithChildren;
 		},
 		{
 			params: t.Object({
 				id: t.String({ format: "uuid" }),
 			}),
 			body: t.Object({
-				name: t.String({ minLength: 1 }),
-				description: t.String({ minLength: 1 }),
-				matchingType: MatchingType,
-				categoryId: t.String({ format: "uuid" }),
-				natureId: t.String({ format: "uuid" }),
-				imageId: t.Optional(t.String({ format: "uuid" })),
-				parentId: t.Optional(t.String({ format: "uuid" })),
+				name: t.Optional(t.String({ minLength: 1 })),
+				matchingType: t.Optional(MatchingType),
 			}),
 			response: {
-				200: t.Composite([
-					KeywordPlain,
-					t.Object({
-						category: KeywordCategoryPlain,
-						nature: KeywordNaturePlain,
-						image: t.Nullable(FilePlain),
-						parent: t.Nullable(KeywordPlain),
-					}),
-				]),
+				200: keywordWithChildrenShape,
 			},
 		},
 	)
@@ -430,7 +336,8 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				include: {
 					_count: {
 						select: {
-							children: true,
+							aliases: true,
+							versions: true,
 							KeywordsChapters: true,
 							replacements: true,
 						},
@@ -441,27 +348,16 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			if (!existingKeyword) {
 				throw new HttpError({
 					statusCode: 404,
-					message: t({
-						en: "Keyword not found",
-						ar: "الكلمة المفتاحية غير موجودة",
-					}),
+					message: t({ en: "Keyword not found", ar: "الكلمة المفتاحية غير موجودة" }),
 				});
 			}
 
 			assertOwnsResource(existingKeyword.createdById, authedUser);
 
-			if (existingKeyword._count.children > 0) {
-				throw new HttpError({
-					message: t({
-						en: "Cannot delete keyword with child keywords",
-						ar: "لا يمكن حذف كلمة مفتاحية لها كلمات فرعية",
-					}),
-				});
-			}
-
-			await prisma.keyword.delete({
-				where: { id },
-			});
+			await prisma.$transaction([
+				prisma.keywordsChapters.deleteMany({ where: { keywordId: id } }),
+				prisma.keyword.delete({ where: { id } }),
+			]);
 
 			return existingKeyword;
 		},
