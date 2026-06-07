@@ -130,6 +130,7 @@ model File {
   users           User[]           @relation("UserAvatars")
   novels          Novel[]          @relation("NovelImages")
   keywordVersions KeywordVersion[] @relation("KeywordVersionImages")
+  keywordAliases  KeywordAlias[]   @relation("KeywordAliasImages")
 }
 
 model Novel {
@@ -245,6 +246,9 @@ model KeywordAlias {
 
   natureId String?
   nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordAliasNatures")
+
+  imageId String?
+  image   File?   @relation(fields: [imageId], references: [id], name: "KeywordAliasImages")
 
   keywordId String
   keyword   Keyword @relation(fields: [keywordId], references: [id], name: "KeywordAliases", onDelete: Cascade)

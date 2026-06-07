@@ -28,6 +28,7 @@ const aliasShape = t.Object({
 	...KeywordAliasPlain.properties,
 	category: t.Nullable(KeywordCategoryPlain),
 	nature: t.Nullable(KeywordNaturePlain),
+	image: t.Nullable(FilePlain),
 });
 
 const versionShape = t.Object({
@@ -51,7 +52,7 @@ const versionInclude = {
 	image: true,
 } as const;
 
-const aliasInclude = { category: true, nature: true } as const;
+const aliasInclude = { category: true, nature: true, image: true } as const;
 
 const keywordInclude = {
 	aliases: {
