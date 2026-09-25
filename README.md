@@ -51,8 +51,9 @@ cp .env.example .env
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `ROOT_USERNAME` | For seed | Root admin username |
 | `ROOT_PASSWORD` | For seed | Root admin password |
-| `JWT_SECRET_KEY` | No | JWT signing secret |
-| `AUTH_TOKEN_EXPIRATION` | No | JWT expiry (e.g. `7d`) |
+| `BETTER_AUTH_SECRET` | Yes | Better Auth signing secret |
+| `BETTER_AUTH_URL` | No | Public base URL for Better Auth |
+| `ROOT_EMAIL` | For seed | Root admin email |
 | `STORAGE_IMGBB_API_KEY` | Yes | ImgBB API key for file uploads |
 | `OPENROUTER_API_KEY` | For AI | OpenRouter API key |
 | `OPENROUTER_MODEL` | No | Model ID (default: `google/gemini-2.5-flash`) |
@@ -68,8 +69,8 @@ Run `make help` for the full list.
 | `make install` | Install dependencies |
 | `make setup` | Docker up + install + generate + migrate + seed |
 | `make dev` | Start API in watch mode |
-| `make build` | Production build (`dist/index.js`) |
-| `make start` | Run production build |
+| `make build` | Generate the Prisma client |
+| `make start` | Run `src/main.ts` |
 | `make typecheck` | TypeScript check |
 | `make test` | Run tests |
 | `make docker-up` | Start Postgres |
@@ -157,7 +158,7 @@ make build
 make start
 ```
 
-Set `NODE_ENV=production` and provide production `DATABASE_URL` and storage credentials.
+Set `NODE_ENV=production` and provide production database, auth, and storage credentials. The current `build` script generates Prisma files; deployment needs a Bun runtime for `src/main.ts`.
 
 ## License
 
