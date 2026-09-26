@@ -19,6 +19,7 @@ Enforce access in the API. `shouldBeGuest()` allows authenticated guests, users,
 - Users can create or change their own keywords, add novel names/slugs, and upload files; admins have full resource management access.
 - Replacement writes, novel deletion, and management of categories, natures, chapters, configs, and website selectors are admin operations, subject to each route's current guard.
 - Password changes require a registered user or admin and the current password; update both credential stores atomically.
+- `/health` and `/health/ready` are public and unauthenticated; never return error details, secrets, or user data from them.
 - Guest accounts may update their own profile. Website selector lookup is available to authenticated roles; selector listing and writes require admin access.
 - If an action's permission is unclear, ask before changing its guard. Check the route itself for the precise current rule.
 

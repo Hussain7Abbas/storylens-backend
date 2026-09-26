@@ -5,6 +5,7 @@ import { ai } from "./routes/ai";
 import { chapters } from "./routes/chapters";
 import { configs } from "./routes/configs";
 import { files } from "./routes/files";
+import { health } from "./routes/health";
 import { keywordCategories } from "./routes/keyword-categories";
 import { keywordNatures } from "./routes/keyword-natures";
 import { keywordAliases } from "./routes/keyword-aliases";
@@ -76,6 +77,7 @@ export const app = new Elysia()
 		message: "Made with ❤️ by Hussain Abbas, for docs checkout /docs",
 	}))
 
+	.use(health)
 	.use(accounts)
 	.use(configs)
 	.use(websiteSelectors)

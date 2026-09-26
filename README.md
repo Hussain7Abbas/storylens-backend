@@ -119,6 +119,11 @@ docker-compose.yml     # Local Postgres
 
 When running locally, the server listens on `http://localhost:3000` (or your configured `PORT`).
 
+Health endpoints (public):
+
+- `GET /health`: liveness, returns `{ "status": "ok", "timestamp": "..." }`
+- `GET /health/ready`: status of `backend`, `database`, and `chromeStore`, plus `versions.review` (`Review_Version`) and `versions.store` (published Chrome Web Store version). Returns 503 if the database is down, and `degraded` if the store check fails.
+
 OpenAPI documentation is served by the backend when the dev server is running. The extension uses this spec to regenerate its API client:
 
 ```bash
