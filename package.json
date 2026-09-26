@@ -16,7 +16,8 @@
     "db:migrate:reset": "bunx prisma migrate reset",
     "db:seed": "bunx prisma db seed",
     "db:studio": "bunx prisma studio",
-    "storage:seed": "bun run storage-seed/main.ts"
+    "storage:seed": "bun run storage-seed/main.ts",
+    "review-version:set": "bun run src/scripts/set_review_version.ts"
   },
   "dependencies": {
     "@elysiajs/bearer": "^1.4.1",

@@ -18,5 +18,6 @@ export const env = createEnv({
     STORAGE_IMGBB_API_KEY: z.string(),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENROUTER_MODEL: z.string().optional(),
+    CHROME_EXTENSION_ID: z.string().optional(),
   },
 });

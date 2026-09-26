@@ -30,4 +30,6 @@ The development OpenAPI UI is at `/docs` and the spec at `/openapi.json`; the ex
 
 From this directory, use `bun run dev`, `bun run typecheck`, and `bun run test`. Use `bun run db:generate`, `bun run db:migrate:dev`, and `bun run db:seed` for schema and seed work. `make help` lists Docker, migration, storage, and start targets. The `build` script currently generates the Prisma client, and `start` runs `src/main.ts`; do not assume a compiled production bundle.
 
+Production runs under PM2. Deploy only with `make sync` (`pm2-stop`, `git pull`, `db-generate`, `db-migrate-deploy`, `build`, `pm2-restart`) and use the `pm2-*` Make targets rather than raw `bun`/`pm2` commands on the server. `src/scripts/` holds one-off scripts run through Make targets, such as `make set-review-version VERSION=x.y.z`. The `review-version-watcher` cron in `src/plugins/crons.ts` runs `make sync` once the `Review_Version` config matches the published Chrome Web Store version; logic lives in `src/lib/review-version.ts`.
+
 Keep this file and the [backend guide](../../docs/backend.md) current when backend rules, structure, commands, or interfaces change, following the root maintenance rule.

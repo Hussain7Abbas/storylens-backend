@@ -28,13 +28,13 @@ if ! command -v pm2 >/dev/null 2>&1; then
 fi
 
 echo "Installing dependencies..."
-bun install --frozen-lockfile
+make install
 
 echo "Generating Prisma client..."
-bun run db:generate
+make db-generate
 
 echo "Running database migrations..."
-bun run db:migrate:deploy
+make db-migrate-deploy
 
 if systemctl list-unit-files storylens-api.service --no-pager 2>/dev/null | grep -q storylens-api.service; then
   if systemctl is-active --quiet storylens-api 2>/dev/null; then
@@ -45,8 +45,7 @@ if systemctl list-unit-files storylens-api.service --no-pager 2>/dev/null | grep
 fi
 
 echo "Starting API with PM2 (port 3030)..."
-pm2 startOrReload "${ECOSYSTEM}" --update-env
-pm2 save
+make pm2-restart
 
 echo ""
 echo "Done. API should be listening on 127.0.0.1:3030."

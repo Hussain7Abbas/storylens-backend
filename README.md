@@ -57,6 +57,7 @@ cp .env.example .env
 | `STORAGE_IMGBB_API_KEY` | Yes | ImgBB API key for file uploads |
 | `OPENROUTER_API_KEY` | For AI | OpenRouter API key |
 | `OPENROUTER_MODEL` | No | Model ID (default: `google/gemini-2.5-flash`) |
+| `CHROME_EXTENSION_ID` | For deploy | Chrome Web Store item watched by the review-version cron |
 
 Docker Compose reads `.env` for Postgres container settings (`POSTGRES_*` vars if present).
 
@@ -83,6 +84,9 @@ Run `make help` for the full list.
 | `make db-seed` | Run seed script |
 | `make db-studio` | Open Prisma Studio |
 | `make storage-seed` | Upload seed avatar images to ImgBB |
+| `make sync` | Deploy: `pm2-stop`, `git pull`, `db-generate`, `db-migrate-deploy`, `build`, `pm2-restart` |
+| `make pm2-start` / `pm2-stop` / `pm2-restart` / `pm2-delete` | Manage the `storylens-api` PM2 process |
+| `make set-review-version VERSION=x.y.z` | Upsert the `Review_Version` config |
 
 Equivalent `bun` scripts are in `package.json` (e.g. `bun run dev`, `bun run db:migrate:dev`).
 
@@ -153,12 +157,24 @@ bun test
 
 ## Production
 
+The server runs under PM2 (`ecosystem.config.cjs`, port 3030). Run `deploy/setup-pm2.sh` once, then deploy only with:
+
 ```bash
-make build
-make start
+make sync
 ```
 
+`make sync` stops the API, runs `git pull --ff-only`, `make db-generate`, `make db-migrate-deploy`, and `make build`, then `make pm2-restart`. If an update step fails, it restarts the API and exits with an error. It does not run `make install`; run that before `make sync` when dependencies change.
+
 Set `NODE_ENV=production` and provide production database, auth, and storage credentials. The current `build` script generates Prisma files; deployment needs a Bun runtime for `src/main.ts`.
+
+### Deploying with extension releases
+
+The backend deploys automatically after a new extension version goes live on the Chrome Web Store:
+
+1. The extension's publish workflow submits the zip, then runs `make set-review-version VERSION=<version>` on the server over SSH. `src/scripts/set_review_version.ts` upserts the `Review_Version` config.
+2. In production, the `review-version-watcher` cron checks every 10 minutes. When `Review_Version` exists and matches the version from the public Chrome update endpoint for `CHROME_EXTENSION_ID`, it deletes the config and runs `make sync` detached from the PM2 process. Output goes to `sync.log`.
+
+Deploy this backend once with `make sync` before the first automated release so the script and cron exist on the server.
 
 ## License
 
