@@ -18,6 +18,7 @@ concurrency:
 jobs:
   set-review-version:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Resolve version
         id: version
