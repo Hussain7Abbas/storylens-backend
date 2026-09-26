@@ -171,7 +171,10 @@ Set `NODE_ENV=production` and provide production database, auth, and storage cre
 
 The backend deploys automatically after a new extension version goes live on the Chrome Web Store:
 
-1. The extension's publish workflow submits the zip, then runs `make set-review-version VERSION=<version>` on the server over SSH. `src/scripts/set_review_version.ts` upserts the `Review_Version` config.
+1. The extension's publish workflow submits the zip, then sends an `extension-submitted` `repository_dispatch` event with the version to this repository.
+   `.github/workflows/set-review-version.yml` validates the version, connects to the server over SSH, and runs `make set-review-version VERSION=<version>`.
+   `src/scripts/set_review_version.ts` upserts the `Review_Version` config. The workflow can also be run manually with a `version` input.
+   It needs repository secrets `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KEY`, `BACKEND_PATH`, and optionally `DEPLOY_SSH_PORT`.
 2. In production, the `review-version-watcher` cron checks every 10 minutes. When `Review_Version` exists and matches the version from the public Chrome update endpoint for `CHROME_EXTENSION_ID`, it deletes the config and runs `make sync` detached from the PM2 process. Output goes to `sync.log`.
 
 Deploy this backend once with `make sync` before the first automated release so the script and cron exist on the server.
