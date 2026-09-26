@@ -165,6 +165,41 @@ export const accounts = new Elysia({
     },
   )
 
+  // Change both credential stores atomically; retain the current session.
+  .post(
+    '/change-password',
+    async ({ currentUser, prisma, body, t: translate }) => {
+      if (!currentUser) {
+        throw new HttpError({ statusCode: 401, message: 'Authentication required' });
+      }
+      if (currentUser.role === 'guest') {
+        throw new HttpError({ statusCode: 403, message: 'User role required' });
+      }
+      const valid = await verifyCredentialPassword(prisma, currentUser.id, body.currentPassword);
+      if (!valid) {
+        throw new HttpError({
+          statusCode: 400,
+          message: translate({
+            en: 'Current password is incorrect',
+            ar: 'كلمة المرور الحالية غير صحيحة',
+          }),
+        });
+      }
+      const password = await bcrypt.hash(body.newPassword, 12);
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: currentUser.id }, data: { password } }),
+        prisma.account.updateMany({ where: { userId: currentUser.id, providerId: 'credential' }, data: { password } }),
+      ]);
+      return { success: true };
+    },
+    {
+      body: t.Object({
+        currentPassword: t.String({ minLength: 1 }),
+        newPassword: t.String({ minLength: 8, maxLength: 72 }),
+      }),
+    },
+  )
+
   // Check username availability
   .get(
     '/check-username/:username',

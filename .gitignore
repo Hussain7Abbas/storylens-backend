@@ -7,5 +7,6 @@ dist
 generated
 **/*.tsbuildinfo
 .DS_Store
+sync.log
 
 /prisma/generated/

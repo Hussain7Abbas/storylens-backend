@@ -51,11 +51,13 @@ cp .env.example .env
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `ROOT_USERNAME` | For seed | Root admin username |
 | `ROOT_PASSWORD` | For seed | Root admin password |
-| `JWT_SECRET_KEY` | No | JWT signing secret |
-| `AUTH_TOKEN_EXPIRATION` | No | JWT expiry (e.g. `7d`) |
+| `BETTER_AUTH_SECRET` | Yes | Better Auth signing secret |
+| `BETTER_AUTH_URL` | No | Public base URL for Better Auth |
+| `ROOT_EMAIL` | For seed | Root admin email |
 | `STORAGE_IMGBB_API_KEY` | Yes | ImgBB API key for file uploads |
 | `OPENROUTER_API_KEY` | For AI | OpenRouter API key |
 | `OPENROUTER_MODEL` | No | Model ID (default: `google/gemini-2.5-flash`) |
+| `CHROME_EXTENSION_ID` | For deploy | Chrome Web Store item watched by the review-version cron |
 
 Docker Compose reads `.env` for Postgres container settings (`POSTGRES_*` vars if present).
 
@@ -68,8 +70,8 @@ Run `make help` for the full list.
 | `make install` | Install dependencies |
 | `make setup` | Docker up + install + generate + migrate + seed |
 | `make dev` | Start API in watch mode |
-| `make build` | Production build (`dist/index.js`) |
-| `make start` | Run production build |
+| `make build` | Generate the Prisma client |
+| `make start` | Run `src/main.ts` |
 | `make typecheck` | TypeScript check |
 | `make test` | Run tests |
 | `make docker-up` | Start Postgres |
@@ -82,6 +84,9 @@ Run `make help` for the full list.
 | `make db-seed` | Run seed script |
 | `make db-studio` | Open Prisma Studio |
 | `make storage-seed` | Upload seed avatar images to ImgBB |
+| `make sync` | Deploy: `pm2-stop`, `git pull`, `db-generate`, `db-migrate-deploy`, `build`, `pm2-restart` |
+| `make pm2-start` / `pm2-stop` / `pm2-restart` / `pm2-delete` | Manage the `storylens-api` PM2 process |
+| `make set-review-version VERSION=x.y.z` | Upsert the `Review_Version` config |
 
 Equivalent `bun` scripts are in `package.json` (e.g. `bun run dev`, `bun run db:migrate:dev`).
 
@@ -113,6 +118,11 @@ docker-compose.yml     # Local Postgres
 ## API
 
 When running locally, the server listens on `http://localhost:3000` (or your configured `PORT`).
+
+Health endpoints (public):
+
+- `GET /health`: liveness, returns `{ "status": "ok", "timestamp": "..." }`
+- `GET /health/ready`: status of `backend`, `database`, and `chromeStore`, plus `versions.review` (`Review_Version`) and `versions.store` (published Chrome Web Store version). Returns 503 if the database is down, and `degraded` if the store check fails.
 
 OpenAPI documentation is served by the backend when the dev server is running. The extension uses this spec to regenerate its API client:
 
@@ -152,12 +162,27 @@ bun test
 
 ## Production
 
+The server runs under PM2 (`ecosystem.config.cjs`, port 3030). Run `deploy/setup-pm2.sh` once, then deploy only with:
+
 ```bash
-make build
-make start
+make sync
 ```
 
-Set `NODE_ENV=production` and provide production `DATABASE_URL` and storage credentials.
+`make sync` stops the API, runs `git pull --ff-only`, `make db-generate`, `make db-migrate-deploy`, and `make build`, then `make pm2-restart`. If an update step fails, it restarts the API and exits with an error. It does not run `make install`; run that before `make sync` when dependencies change.
+
+Set `NODE_ENV=production` and provide production database, auth, and storage credentials. The current `build` script generates Prisma files; deployment needs a Bun runtime for `src/main.ts`.
+
+### Deploying with extension releases
+
+The backend deploys automatically after a new extension version goes live on the Chrome Web Store:
+
+1. The extension's publish workflow submits the zip, then sends an `extension-submitted` `repository_dispatch` event with the version to this repository.
+   `.github/workflows/set-review-version.yml` validates the version, connects to the server over SSH, and runs `make set-review-version VERSION=<version>`.
+   `src/scripts/set_review_version.ts` upserts the `Review_Version` config. The workflow can also be run manually with a `version` input.
+   The job uses the `production` environment and needs its secrets `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KEY`, `BACKEND_PATH`, and optionally `DEPLOY_SSH_PORT`.
+2. In production, the `review-version-watcher` cron checks every 10 minutes. When `Review_Version` exists and matches the version from the public Chrome update endpoint for `CHROME_EXTENSION_ID`, it deletes the config and runs `make sync` detached from the PM2 process. Output goes to `sync.log`.
+
+Deploy this backend once with `make sync` before the first automated release so the script and cron exist on the server.
 
 ## License
 

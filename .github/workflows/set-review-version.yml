@@ -1,0 +1,49 @@
+name: Set Review_Version
+
+# Triggered by the extension's publish workflow after a Chrome Web Store submission.
+# The review-version cron runs `make sync` once this version is live on the store.
+on:
+  repository_dispatch:
+    types: [extension-submitted]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Extension version submitted to the Chrome Web Store
+        required: true
+
+concurrency:
+  group: set-review-version
+  cancel-in-progress: false
+
+jobs:
+  set-review-version:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Resolve version
+        id: version
+        env:
+          VERSION: ${{ github.event.client_payload.version || inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]]; then
+            echo "Invalid extension version: '$VERSION'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set Review_Version on server
+        uses: appleboy/ssh-action@v1
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BACKEND_PATH: ${{ secrets.BACKEND_PATH }}
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
+          envs: VERSION,BACKEND_PATH
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.bun/bin:$PATH"
+            cd "$BACKEND_PATH"
+            make set-review-version VERSION="$VERSION"
