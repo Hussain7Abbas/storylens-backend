@@ -18,6 +18,7 @@ Enforce access in the API. `shouldBeGuest()` allows authenticated guests, users,
 - Authenticated roles can read novels, keywords, replacements, categories, natures, and chapters.
 - Users can create or change their own keywords, add novel names/slugs, and upload files; admins have full resource management access.
 - Replacement writes, novel deletion, and management of categories, natures, chapters, configs, and website selectors are admin operations, subject to each route's current guard.
+- Password changes require a registered user or admin and the current password; update both credential stores atomically.
 - Guest accounts may update their own profile. Website selector lookup is available to authenticated roles; selector listing and writes require admin access.
 - If an action's permission is unclear, ask before changing its guard. Check the route itself for the precise current rule.
 
