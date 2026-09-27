@@ -185,6 +185,8 @@ model KeywordCategory {
   nameEn String?
   nameAr String?
   color  String
+  // Explains when to use it; the AI keyword suggestion reads this.
+  description String?
 
   // Metadata
   createdAt DateTime @default(now())
@@ -201,6 +203,8 @@ model KeywordNature {
   nameEn String?
   nameAr String?
   color  String
+  // Explains when to use it; the AI keyword suggestion reads this.
+  description String?
 
   // Metadata
   createdAt DateTime @default(now())

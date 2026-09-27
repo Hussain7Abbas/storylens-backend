@@ -117,6 +117,7 @@ export const keywordCategories = new Elysia({
           nameEn: body.nameEn,
           nameAr: body.nameAr,
           color: body.color,
+          description: body.description,
         },
       });
 
@@ -127,6 +128,7 @@ export const keywordCategories = new Elysia({
         nameEn: t.Optional(t.String()),
         nameAr: t.Optional(t.String()),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
+        description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: {
         200: KeywordCategoryPlain,
@@ -177,6 +179,7 @@ export const keywordCategories = new Elysia({
           nameEn: body.nameEn,
           nameAr: body.nameAr,
           color: body.color,
+          description: body.description,
         },
       });
 
@@ -190,6 +193,7 @@ export const keywordCategories = new Elysia({
         nameEn: t.Optional(t.String()),
         nameAr: t.Optional(t.String()),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
+        description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: {
         200: KeywordCategoryPlain,
