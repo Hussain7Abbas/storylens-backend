@@ -1,8 +1,10 @@
 import { Elysia, t } from 'elysia';
-import { auth } from '@/lib/auth';
+import { auth, googleEnabled } from '@/lib/auth';
+import { mergeGuestInto } from '@/lib/auth/oauth';
 import {
   createCredentialAccount,
   createSessionToken,
+  getUserFromBearerToken,
   toAuthUser,
   verifyCredentialPassword,
 } from '@/lib/auth/session';
@@ -61,6 +63,208 @@ export const accounts = new Elysia({
       }),
     },
   )
+
+  // Sign-in and registration must work without a session: signing out on the
+  // website clears it. Register still upgrades a guest when a token is sent.
+  // Register (upgrade guest to user with email+password)
+  .post(
+    '/register',
+    async ({ currentUser, prisma, body, t: translate }) => {
+      const email = sanitize(body.email).toLowerCase();
+      const username = sanitize(body.username);
+
+      const existingEmail = await prisma.user.findUnique({
+        where: { email },
+      });
+
+      if (existingEmail && existingEmail.id !== currentUser?.id) {
+        throw new HttpError({
+          message: translate({
+            en: 'Email already registered',
+            ar: 'البريد الإلكتروني مسجل بالفعل',
+          }),
+        });
+      }
+
+      const existingUsername = await prisma.user.findUnique({
+        where: { username },
+      });
+
+      if (existingUsername && existingUsername.id !== currentUser?.id) {
+        throw new HttpError({
+          message: translate({
+            en: 'Username already taken',
+            ar: 'اسم المستخدم مأخوذ بالفعل',
+          }),
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(body.password, 12);
+
+      if (currentUser?.role === 'guest') {
+        const user = await prisma.user.update({
+          where: { id: currentUser.id },
+          data: {
+            email,
+            username,
+            password: hashedPassword,
+            name: body.name ? sanitize(body.name) : username,
+            role: 'user',
+            emailVerified: false,
+          },
+        });
+
+        const account = await prisma.account.findFirst({
+          where: { userId: user.id, providerId: 'credential' },
+        });
+
+        if (account) {
+          await prisma.account.update({
+            where: { id: account.id },
+            data: {
+              accountId: email,
+              password: hashedPassword,
+            },
+          });
+        } else {
+          await createCredentialAccount(prisma, user.id, email, body.password);
+        }
+
+        const token = await createSessionToken(prisma, user.id);
+
+        return {
+          user: toAuthUser(user),
+          token,
+        };
+      }
+
+      const user = await prisma.user.create({
+        data: {
+          email,
+          username,
+          password: hashedPassword,
+          name: body.name ? sanitize(body.name) : username,
+          role: 'user',
+        },
+      });
+
+      await createCredentialAccount(prisma, user.id, email, body.password);
+      const token = await createSessionToken(prisma, user.id);
+
+      return {
+        user: toAuthUser(user),
+        token,
+      };
+    },
+    {
+      body: t.Object({
+        email: t.String({ format: 'email' }),
+        password: t.String({ minLength: 8 }),
+        username: t.String({ minLength: 3, maxLength: 30 }),
+        name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+      }),
+    },
+  )
+
+  // Login with email and password
+  .post(
+    '/login',
+    async ({ prisma, body, t: translate }) => {
+      const email = body.email.toLowerCase();
+
+      const user = await prisma.user.findUnique({
+        where: { email },
+      });
+
+      if (!user) {
+        throw new HttpError({
+          statusCode: 401,
+          message: translate({
+            en: 'Invalid email or password',
+            ar: 'بريد إلكتروني أو كلمة مرور غير صالحة',
+          }),
+        });
+      }
+
+      const valid = await verifyCredentialPassword(prisma, user.id, body.password);
+      if (!valid) {
+        throw new HttpError({
+          statusCode: 401,
+          message: translate({
+            en: 'Invalid email or password',
+            ar: 'بريد إلكتروني أو كلمة مرور غير صالحة',
+          }),
+        });
+      }
+
+      const token = await createSessionToken(prisma, user.id);
+
+      return {
+        user: toAuthUser(user),
+        token,
+      };
+    },
+    {
+      body: t.Object({
+        email: t.String({ format: 'email' }),
+        password: t.String({ minLength: 1 }),
+      }),
+    },
+  )
+
+  // Which OAuth providers the website may offer.
+  .get('/providers', () => ({ google: googleEnabled }))
+
+  // Exchange the Better Auth cookie session left by an OAuth callback for a
+  // bearer session the extension can store, then end the cookie session.
+  // A guest token from the same browser merges that guest into the account.
+  .post(
+    '/oauth/session',
+    async ({ prisma, body, request, set, t: translate }) => {
+      const oauth = await auth.api.getSession({ headers: request.headers });
+      if (!oauth) {
+        throw new HttpError({
+          statusCode: 401,
+          message: translate({
+            en: 'Sign-in session expired. Please try again.',
+            ar: 'انتهت جلسة تسجيل الدخول. يرجى المحاولة مجددًا.',
+          }),
+        });
+      }
+
+      const guest = await getUserFromBearerToken(prisma, body.guestToken);
+      if (guest?.role === 'guest' && guest.id !== oauth.user.id) {
+        await mergeGuestInto(prisma, guest.id, oauth.user.id);
+      }
+
+      const user = await prisma.user.findUniqueOrThrow({
+        where: { id: oauth.user.id },
+      });
+      const token = await createSessionToken(prisma, user.id);
+
+      const signOut = await auth.api.signOut({
+        headers: request.headers,
+        returnHeaders: true,
+      });
+      const cookies = signOut.headers.getSetCookie();
+      if (cookies.length > 0) set.headers['set-cookie'] = cookies;
+
+      return { user: toAuthUser(user), token };
+    },
+    {
+      body: t.Object({
+        guestToken: t.Optional(t.String({ maxLength: 200 })),
+      }),
+    },
+  )
+
+  // Better Auth (OAuth sign-in, callbacks, cookie sessions). Unguarded because
+  // OAuth starts signed out; static routes above and below take precedence.
+  .all('/*', async ({ request }) => auth.handler(request), {
+    detail: {
+      hide: true,
+    },
+  })
 
   // Get current user profile
   .use(shouldBeGuest())
@@ -216,159 +420,4 @@ export const accounts = new Elysia({
         username: t.String({ minLength: 3, maxLength: 30 }),
       }),
     },
-  )
-
-  // Register (upgrade guest to user with email+password)
-  .post(
-    '/register',
-    async ({ currentUser, prisma, body, t: translate }) => {
-      const email = sanitize(body.email).toLowerCase();
-      const username = sanitize(body.username);
-
-      const existingEmail = await prisma.user.findUnique({
-        where: { email },
-      });
-
-      if (existingEmail && existingEmail.id !== currentUser?.id) {
-        throw new HttpError({
-          message: translate({
-            en: 'Email already registered',
-            ar: 'البريد الإلكتروني مسجل بالفعل',
-          }),
-        });
-      }
-
-      const existingUsername = await prisma.user.findUnique({
-        where: { username },
-      });
-
-      if (existingUsername && existingUsername.id !== currentUser?.id) {
-        throw new HttpError({
-          message: translate({
-            en: 'Username already taken',
-            ar: 'اسم المستخدم مأخوذ بالفعل',
-          }),
-        });
-      }
-
-      const hashedPassword = await bcrypt.hash(body.password, 12);
-
-      if (currentUser?.role === 'guest') {
-        const user = await prisma.user.update({
-          where: { id: currentUser.id },
-          data: {
-            email,
-            username,
-            password: hashedPassword,
-            name: body.name ? sanitize(body.name) : username,
-            role: 'user',
-            emailVerified: false,
-          },
-        });
-
-        const account = await prisma.account.findFirst({
-          where: { userId: user.id, providerId: 'credential' },
-        });
-
-        if (account) {
-          await prisma.account.update({
-            where: { id: account.id },
-            data: {
-              accountId: email,
-              password: hashedPassword,
-            },
-          });
-        } else {
-          await createCredentialAccount(prisma, user.id, email, body.password);
-        }
-
-        const token = await createSessionToken(prisma, user.id);
-
-        return {
-          user: toAuthUser(user),
-          token,
-        };
-      }
-
-      const user = await prisma.user.create({
-        data: {
-          email,
-          username,
-          password: hashedPassword,
-          name: body.name ? sanitize(body.name) : username,
-          role: 'user',
-        },
-      });
-
-      await createCredentialAccount(prisma, user.id, email, body.password);
-      const token = await createSessionToken(prisma, user.id);
-
-      return {
-        user: toAuthUser(user),
-        token,
-      };
-    },
-    {
-      body: t.Object({
-        email: t.String({ format: 'email' }),
-        password: t.String({ minLength: 8 }),
-        username: t.String({ minLength: 3, maxLength: 30 }),
-        name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
-      }),
-    },
-  )
-
-  // Login with email and password
-  .post(
-    '/login',
-    async ({ prisma, body, t: translate }) => {
-      const email = body.email.toLowerCase();
-
-      const user = await prisma.user.findUnique({
-        where: { email },
-      });
-
-      if (!user) {
-        throw new HttpError({
-          statusCode: 401,
-          message: translate({
-            en: 'Invalid email or password',
-            ar: 'بريد إلكتروني أو كلمة مرور غير صالحة',
-          }),
-        });
-      }
-
-      const valid = await verifyCredentialPassword(prisma, user.id, body.password);
-      if (!valid) {
-        throw new HttpError({
-          statusCode: 401,
-          message: translate({
-            en: 'Invalid email or password',
-            ar: 'بريد إلكتروني أو كلمة مرور غير صالحة',
-          }),
-        });
-      }
-
-      const token = await createSessionToken(prisma, user.id);
-
-      return {
-        user: toAuthUser(user),
-        token,
-      };
-    },
-    {
-      body: t.Object({
-        email: t.String({ format: 'email' }),
-        password: t.String({ minLength: 1 }),
-      }),
-    },
-  )
-
-  // BetterAuth handler (OAuth etc.) — must be last
-  .all('/*', async ({ request }) => {
-    return auth.handler(request);
-  }, {
-    detail: {
-      hide: true,
-    },
-  });
+  );

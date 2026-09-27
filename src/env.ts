@@ -15,6 +15,11 @@ export const env = createEnv({
     ROOT_EMAIL: z.string().optional(),
     BETTER_AUTH_SECRET: z.string(),
     BETTER_AUTH_URL: z.string().optional(),
+    // Website origin that hosts account pages; OAuth redirects back to it.
+    WEBSITE_URL: z.url().default('https://storylens.iscoded.com'),
+    // Google sign-in is enabled only when both are set.
+    GOOGLE_CLIENT_ID: z.string().optional(),
+    GOOGLE_CLIENT_SECRET: z.string().optional(),
     STORAGE_IMGBB_API_KEY: z.string(),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENROUTER_MODEL: z.string().optional(),
