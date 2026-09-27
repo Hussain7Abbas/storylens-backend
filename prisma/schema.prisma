@@ -41,7 +41,9 @@ model User {
   password      String
 
   // Profile
-  name String
+  name  String
+  // Provider profile picture URL; Better Auth writes it on OAuth sign-up.
+  image String?
 
   // Authorization
   role Role @default(guest)
@@ -183,6 +185,8 @@ model KeywordCategory {
   nameEn String?
   nameAr String?
   color  String
+  // Explains when to use it; the AI keyword suggestion reads this.
+  description String?
 
   // Metadata
   createdAt DateTime @default(now())
@@ -199,6 +203,8 @@ model KeywordNature {
   nameEn String?
   nameAr String?
   color  String
+  // Explains when to use it; the AI keyword suggestion reads this.
+  description String?
 
   // Metadata
   createdAt DateTime @default(now())

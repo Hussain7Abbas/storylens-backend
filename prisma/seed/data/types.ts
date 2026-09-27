@@ -25,12 +25,14 @@ export type SeedKeywordCategory = {
   nameEn?: string;
   nameAr?: string;
   color: string;
+  description?: string;
 };
 
 export type SeedKeywordNature = {
   nameEn?: string;
   nameAr?: string;
   color: string;
+  description?: string;
 };
 
 export type KeywordCategoryName = 'انثى' | 'بطل' | 'ذكر' | 'سيد';

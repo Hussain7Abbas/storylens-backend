@@ -99,7 +99,12 @@ export const keywordNatures = new Elysia({
       }
 
       const nature = await prisma.keywordNature.create({
-        data: { nameEn: body.nameEn, nameAr: body.nameAr, color: body.color },
+        data: {
+          nameEn: body.nameEn,
+          nameAr: body.nameAr,
+          color: body.color,
+          description: body.description,
+        },
       });
 
       return nature;
@@ -109,6 +114,7 @@ export const keywordNatures = new Elysia({
         nameEn: t.Optional(t.String()),
         nameAr: t.Optional(t.String()),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
+        description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: { 200: KeywordNaturePlain },
     },
@@ -141,7 +147,12 @@ export const keywordNatures = new Elysia({
 
       const nature = await prisma.keywordNature.update({
         where: { id },
-        data: { nameEn: body.nameEn, nameAr: body.nameAr, color: body.color },
+        data: {
+          nameEn: body.nameEn,
+          nameAr: body.nameAr,
+          color: body.color,
+          description: body.description,
+        },
       });
 
       return nature;
@@ -152,6 +163,7 @@ export const keywordNatures = new Elysia({
         nameEn: t.Optional(t.String()),
         nameAr: t.Optional(t.String()),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
+        description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: { 200: KeywordNaturePlain },
     },

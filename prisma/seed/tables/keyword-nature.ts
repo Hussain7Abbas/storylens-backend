@@ -9,6 +9,7 @@ export async function seedKeywordNature(prisma: PrismaClient) {
       nameEn: nature.nameEn,
       nameAr: nature.nameAr,
       color: nature.color,
+      description: nature.description,
     })),
   });
 }
