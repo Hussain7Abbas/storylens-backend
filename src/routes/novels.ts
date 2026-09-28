@@ -1,12 +1,7 @@
 import { ChapterPlain, FilePlain, NovelPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
-import {
-  isAdmin,
-  shouldBeAdmin,
-  shouldBeGuest,
-  shouldBeUser,
-} from '@/middleware/authorize';
+import { authorize, canModerate } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitize, sanitizeObject } from '@/utils/sanitize';
@@ -17,7 +12,7 @@ export const novels = new Elysia({
   tags: ['Novels'],
 })
   .use(setup)
-  .use(shouldBeGuest())
+  .use(authorize('user'))
 
   // Get all novels with pagination
   .get(
@@ -143,12 +138,11 @@ export const novels = new Elysia({
     },
   )
 
-  // Create novel (user: name, slugs and context only; admin: full)
-  .use(shouldBeUser())
+  // Create novel (reader: name, slugs and context only; moderator: full)
   .post(
     '/',
     async ({ prisma, body, authedUser, t }) => {
-      if (isAdmin(authedUser)) {
+      if (canModerate(authedUser)) {
         const sanitizedBody = sanitizeObject(body);
 
         const novel = await prisma.novel.create({
@@ -205,7 +199,7 @@ export const novels = new Elysia({
     },
   )
 
-  // Update novel (user: slugs, plus context while it is empty; admin: full)
+  // Update novel (reader: slugs, plus context while it is empty; moderator: full)
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -223,9 +217,9 @@ export const novels = new Elysia({
         });
       }
 
-      if (!isAdmin(authedUser)) {
+      if (!canModerate(authedUser)) {
         const slugs = body.slugs?.map((slug) => sanitize(slug)) ?? existingNovel.slugs;
-        // Users may fill a missing context; only admins can change an existing one.
+        // Readers may fill a missing context; only moderators can change an existing one.
         const context =
           body.context && !existingNovel.context?.trim()
             ? sanitize(body.context)
@@ -280,7 +274,7 @@ export const novels = new Elysia({
     },
   )
 
-  // Set novel context (user: only while it is empty, e.g. AI auto-fill; admin: always)
+  // Set novel context (reader: only while it is empty, e.g. AI auto-fill; moderator: always)
   .put(
     '/:id/context',
     async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -298,11 +292,11 @@ export const novels = new Elysia({
         });
       }
 
-      if (!isAdmin(authedUser) && existingNovel.context?.trim()) {
+      if (!canModerate(authedUser) && existingNovel.context?.trim()) {
         throw new HttpError({
           statusCode: 403,
           message: t({
-            en: 'Only admins can change an existing novel context',
+            en: 'Only moderators can change an existing novel context',
             ar: 'يمكن للمشرفين فقط تعديل سياق الرواية الموجود',
           }),
         });
@@ -334,8 +328,7 @@ export const novels = new Elysia({
     },
   )
 
-  // Delete novel (admin only)
-  .use(shouldBeAdmin())
+  // Delete novel (moderator by default)
   .delete(
     '/:id',
     async ({ t, prisma, params: { id } }) => {

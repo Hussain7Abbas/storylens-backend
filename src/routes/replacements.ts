@@ -6,11 +6,7 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
-import {
-  assertOwnsResource,
-  shouldBeGuest,
-  shouldBeUser,
-} from '@/middleware/authorize';
+import { assertOwnsResource, authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitizeObject } from '@/utils/sanitize';
@@ -26,7 +22,7 @@ export const replacements = new Elysia({
   tags: ['Replacements'],
 })
   .use(setup)
-  .use(shouldBeGuest())
+  .use(authorize('user'))
 
   // Get all Replacements with filters
   .get(
@@ -162,8 +158,7 @@ export const replacements = new Elysia({
     },
   )
 
-  // Create replacement (users and admins)
-  .use(shouldBeUser())
+  // Create replacement (readers and moderators)
   .post(
     '/',
     async ({ t, prisma, body, authedUser }) => {
@@ -205,7 +200,7 @@ export const replacements = new Elysia({
     },
   )
 
-  // Update replacement (own for users, any for admins)
+  // Update replacement (own for readers, any for moderators)
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -255,7 +250,7 @@ export const replacements = new Elysia({
     },
   )
 
-  // Delete replacement (own for users, any for admins)
+  // Delete replacement (own for readers, any for moderators)
   .delete(
     '/:id',
     async ({ t, prisma, params: { id }, authedUser }) => {

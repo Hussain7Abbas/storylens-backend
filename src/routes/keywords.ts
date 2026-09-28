@@ -12,11 +12,7 @@ import {
 	NovelPlain,
 	ReplacementPlain,
 } from "@/lib/db";
-import {
-	assertOwnsResource,
-	shouldBeGuest,
-	shouldBeUser,
-} from "@/middleware/authorize";
+import { assertOwnsResource, authorize } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
@@ -67,7 +63,7 @@ const keywordInclude = {
 
 export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 	.use(setup)
-	.use(shouldBeGuest())
+	.use(authorize('user'))
 
 	// Get all keywords with filters
 	.get(
@@ -202,8 +198,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 		},
 	)
 
-	// Create keyword (user + admin)
-	.use(shouldBeUser())
+	// Create keyword (reader and moderator)
 	.post(
 		"/",
 		async ({ t, prisma, body, authedUser }) => {
@@ -274,7 +269,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 		},
 	)
 
-	// Update keyword (own only for user, all for admin)
+	// Update keyword (own for readers, any for moderators)
 	.put(
 		"/:id",
 		async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -327,7 +322,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 		},
 	)
 
-	// Delete keyword (own only for user, all for admin)
+	// Delete keyword (own for readers, any for moderators)
 	.delete(
 		"/:id",
 		async ({ t, prisma, params: { id }, authedUser }) => {

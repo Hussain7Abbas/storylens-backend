@@ -9,12 +9,12 @@ import { seedKeywordReplacement } from "./tables/keyword-replacement";
 import { seedKeywords } from "./tables/keywords";
 import { seedKeywordsChapters } from "./tables/keywords-chapters";
 import { seedNovels } from "./tables/novels";
-import { seedRootAdmin } from "./tables/root-admin";
+import { seedDashboardAdmin } from "./tables/dashboard-admin";
 
 const prisma = new PrismaClient();
 
 async function main() {
-	await seedRootAdmin(prisma);
+	await seedDashboardAdmin(prisma);
 	await seedConfigs(prisma);
 	await seedWebsiteSelectors(prisma);
 

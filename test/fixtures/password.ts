@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import bcrypt from 'bcryptjs';
 import { Elysia } from 'elysia';
 import { HttpError } from '@/utils/errors';
+import { sessionUser, withRole } from './access';
 
-type Row = { id: string; email: string; username: string; name: string; role: string; password: string; emailVerified?: boolean };
+type Row = { id: string; email: string; username: string; name: string; portal: 'admin' | 'user'; isGuest: boolean; roleId: string | null; password: string; emailVerified?: boolean };
 type VerificationRow = { id: string; identifier: string; value: string; expiresAt: Date; createdAt: Date };
 type VerificationWhere = { id?: string; identifier?: string; value?: string };
-const baseUser: Row = { id: 'user-id', email: 'reader@example.com', username: 'reader', name: 'Reader', role: 'user', password: '' };
+const baseUser: Row = { id: 'user-id', email: 'reader@example.com', username: 'reader', name: 'Reader', portal: 'user', isGuest: false, roleId: 'role-reader', password: '' };
 let users: Row[] = [];
-let currentRole = 'user';
+let currentRoleId = 'role-reader';
 let hashedPassword: string;
 let verifications: VerificationRow[] = [];
 let sent: { to: string; text: string }[] = [];
@@ -39,7 +40,7 @@ const fakePrisma = {
    writes.push({ target: 'user', data: args.data });
    const row = users.find(u => u.id === args.where.id);
    if (!row) throw new Error('missing user');
-   Object.assign(row, args.data); return row;
+   Object.assign(row, args.data); return withRole(row);
   },
  },
 };
@@ -47,7 +48,9 @@ mock.module('@/lib/email', () => ({ sendEmail: async (message: { to: string; tex
 mock.module('@/setup', () => ({ setup: new Elysia({ name: 'setup' })
  .decorate('prisma', fakePrisma)
  .derive({ as: 'scoped' }, ({ headers }) => ({
-  currentUser: headers.authorization ? { ...(users[0] ?? baseUser), role: currentRole } : null,
+  currentUser: headers.authorization
+   ? sessionUser({ ...(users[0] ?? baseUser), roleId: currentRoleId, isGuest: currentRoleId === 'role-guest' })
+   : null,
   t: ({ en }: { en: string; ar: string }) => en,
  })) }));
 const { accounts } = await import('@/routes/accounts');
@@ -56,7 +59,7 @@ const app = new Elysia().error({ HttpError }).onError(({ error, set }) => {
 }).use(accounts);
 
 beforeEach(async () => {
- currentRole = 'user'; writes.length = 0; verifications = []; sent = []; deliver = true;
+ currentRoleId = 'role-reader'; writes.length = 0; verifications = []; sent = []; deliver = true;
  users = [{ ...baseUser }, { ...baseUser, id: 'other-id', email: 'taken@example.com', username: 'other' }];
  hashedPassword = await bcrypt.hash('old-password', 4);
 });
@@ -105,8 +108,8 @@ describe('change password', () => {
  it('drops the code when the email cannot be sent', async () => {
   deliver = false; expect((await requestPassword()).status).toBe(502); expect(verifications).toHaveLength(0);
  });
- it('supports admins', async () => { currentRole = 'admin'; expect((await requestPassword()).status).toBe(200); });
- it('rejects guests', async () => { currentRole = 'guest'; expect((await requestPassword()).status).toBe(403); expect(sent).toHaveLength(0); });
+ it('supports moderators', async () => { currentRoleId = 'role-moderator'; expect((await requestPassword()).status).toBe(200); });
+ it('rejects guests', async () => { currentRoleId = 'role-guest'; expect((await requestPassword()).status).toBe(403); expect(sent).toHaveLength(0); });
  it('requires authentication', async () => { expect((await requestPassword('old-password', 'new-password', false)).status).toBe(401); expect(sent).toHaveLength(0); });
  it('rejects an incorrect current password without sending a code', async () => { expect((await requestPassword('incorrect')).status).toBe(400); expect(sent).toHaveLength(0); });
  it('rejects short new passwords', async () => { expect((await requestPassword('old-password', 'short')).status).toBe(422); expect(sent).toHaveLength(0); });
@@ -142,6 +145,6 @@ describe('change email', () => {
   expect((await post('change-email/verify', { code: codeFrom(0) })).status).toBe(400);
   expect(writes).toHaveLength(0);
  });
- it('rejects guests', async () => { currentRole = 'guest'; expect((await post('change-email', { email: 'new@example.com' })).status).toBe(403); });
+ it('rejects guests', async () => { currentRoleId = 'role-guest'; expect((await post('change-email', { email: 'new@example.com' })).status).toBe(403); });
  it('requires authentication', async () => { expect((await post('change-email', { email: 'new@example.com' }, false)).status).toBe(401); });
 });

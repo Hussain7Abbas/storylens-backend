@@ -1,18 +1,19 @@
 import { ConfigPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
-import { shouldBeAdmin } from '@/middleware/authorize';
+import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 
 /**
- * Config routes for managing application configuration
+ * Application configuration (for example `Review_Version`), managed from the
+ * dashboard at `/api/admin/configs`.
  */
-export const configs = new Elysia({
+export const adminConfigs = new Elysia({
   prefix: '/configs',
-  tags: ['Configs'],
+  tags: ['Admin: Configs'],
 })
   .use(setup)
-  .use(shouldBeAdmin())
+  .use(authorize('admin'))
 
   /**
    * Get all configs
@@ -36,6 +37,7 @@ export const configs = new Elysia({
           data: t.Array(ConfigPlain),
         }),
       },
+      detail: { summary: 'List configs' },
     },
   )
 
@@ -62,6 +64,7 @@ export const configs = new Elysia({
       response: {
         200: ConfigPlain,
       },
+      detail: { summary: 'View a config' },
     },
   )
 
@@ -92,6 +95,7 @@ export const configs = new Elysia({
       response: {
         200: ConfigPlain,
       },
+      detail: { summary: 'Create or update a config' },
     },
   )
 
@@ -122,5 +126,6 @@ export const configs = new Elysia({
       response: {
         200: ConfigPlain,
       },
+      detail: { summary: 'Delete a config' },
     },
   );

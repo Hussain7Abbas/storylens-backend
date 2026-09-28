@@ -20,10 +20,11 @@ enum FileType {
   Video
 }
 
-enum Role {
-  guest
-  user
+// Which API a user signs in to: `admin` is the dashboard (`/api/admin`),
+// `user` is the extension and desktop client (`/api/user`).
+enum Portal {
   admin
+  user
 }
 
 enum MatchingType {
@@ -45,8 +46,12 @@ model User {
   // Provider profile picture URL; Better Auth writes it on OAuth sign-up.
   image String?
 
-  // Authorization
-  role Role @default(guest)
+  // Authorization: the portal selects the API, the role grants permissions in it.
+  portal  Portal  @default(user)
+  // Anonymous extension install; verified registration or OAuth clears it.
+  isGuest Boolean @default(false)
+  roleId  String?
+  role    Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
 
   avatarId String?
   avatar   File?   @relation(fields: [avatarId], references: [id], name: "UserAvatars")
@@ -64,6 +69,52 @@ model User {
   replacements    Replacement[]    @relation("ReplacementCreator")
   sessions        Session[]
   accounts        Account[]
+}
+
+// A named set of permissions for one portal. System roles (fixed slugs) are
+// created by migrations and cannot be deleted; `super-admin` always holds
+// every admin permission.
+model Role {
+  id String @id @default(uuid())
+
+  slug        String  @unique
+  name        String
+  description String?
+  portal      Portal
+  isSystem    Boolean @default(false)
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  permissions Permission[] @relation("RolePermissions")
+  users       User[]
+
+  @@index([portal])
+}
+
+// One row per API endpoint (`METHOD /route/:template`) plus capability keys
+// such as `user:moderate`. The server syncs endpoint rows from its routes on
+// startup.
+model Permission {
+  id String @id @default(uuid())
+
+  key         String  @unique
+  portal      Portal
+  group       String
+  method      String?
+  path        String?
+  description String?
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  roles Role[] @relation("RolePermissions")
+
+  @@index([portal])
 }
 
 model Session {

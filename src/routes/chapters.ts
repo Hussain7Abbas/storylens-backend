@@ -6,14 +6,14 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
-import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
+import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
 
 export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
   .use(setup)
-  .use(shouldBeGuest())
+  .use(authorize('user'))
 
   // Get all chapters for a novel
   .get(
@@ -126,8 +126,7 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
     },
   )
 
-  // Create chapter (admin only)
-  .use(shouldBeAdmin())
+  // Create chapter (moderator by default)
   .post(
     '/',
     async ({ t, prisma, body }) => {

@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordAliasPlain, KeywordCategoryPlain, KeywordNaturePlain, MatchingType } from "@/lib/db";
-import { assertOwnsResource, shouldBeGuest, shouldBeUser } from "@/middleware/authorize";
+import { assertOwnsResource, authorize } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
@@ -18,7 +18,7 @@ const aliasWithStyleShape = t.Object({
 
 export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["Keywords"] })
 	.use(setup)
-	.use(shouldBeGuest())
+	.use(authorize('user'))
 
 	.get(
 		"/",
@@ -60,7 +60,6 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 		},
 	)
 
-	.use(shouldBeUser())
 
 	.post(
 		"/",

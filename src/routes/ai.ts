@@ -1,6 +1,7 @@
 import { detectChapterSelectors } from '@/lib/ai';
 import { Elysia, t } from 'elysia';
 import { env } from '@/env';
+import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 
@@ -19,6 +20,7 @@ export const ai = new Elysia({
   tags: ['AI'],
 })
   .use(setup)
+  .use(authorize('user'))
 
   .post(
     '/chapter-selectors',

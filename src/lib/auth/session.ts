@@ -1,20 +1,44 @@
-import type { PrismaClient, User } from '@prisma/client';
+import type { Portal, Prisma, PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export type AuthUserPayload = Pick<
-  User,
-  'id' | 'email' | 'username' | 'name' | 'role'
->;
+/** Load a user with this to build its `AuthUserPayload`. */
+export const authUserInclude = {
+  role: {
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      permissions: { select: { key: true } },
+    },
+  },
+} satisfies Prisma.UserInclude;
 
-export function toAuthUser(user: User): AuthUserPayload {
+export type UserWithAccess = Prisma.UserGetPayload<{ include: typeof authUserInclude }>;
+
+export type AuthUserPayload = {
+  id: string;
+  email: string;
+  username: string;
+  name: string;
+  portal: Portal;
+  isGuest: boolean;
+  role: { id: string; slug: string; name: string } | null;
+  /** Permission keys granted by the role, e.g. `GET /api/user/novels/`. */
+  permissions: string[];
+};
+
+export function toAuthUser(user: UserWithAccess): AuthUserPayload {
   return {
     id: user.id,
     email: user.email,
     username: user.username,
     name: user.name,
-    role: user.role,
+    portal: user.portal,
+    isGuest: user.isGuest,
+    role: user.role ? { id: user.role.id, slug: user.role.slug, name: user.role.name } : null,
+    permissions: user.role?.permissions.map((permission) => permission.key) ?? [],
   };
 }
 
@@ -57,14 +81,14 @@ export async function createSessionToken(
 export async function getUserFromBearerToken(
   prisma: PrismaClient,
   token: string | undefined,
-): Promise<User | null> {
+): Promise<UserWithAccess | null> {
   if (!token) {
     return null;
   }
 
   const session = await prisma.session.findUnique({
     where: { token },
-    include: { user: true },
+    include: { user: { include: authUserInclude } },
   });
 
   if (!session || session.expiresAt <= new Date()) {
@@ -96,4 +120,8 @@ export async function verifyCredentialPassword(
   }
 
   return bcrypt.compare(plainPassword, user.password);
+}
+
+export async function deleteSessionToken(prisma: PrismaClient, token: string): Promise<void> {
+  await prisma.session.deleteMany({ where: { token } });
 }

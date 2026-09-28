@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia';
-import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
+import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import {
@@ -13,10 +13,10 @@ export const websiteSelectors = new Elysia({
   tags: ['WebsiteSelectors'],
 })
   .use(setup)
-  .use(shouldBeGuest())
+  .use(authorize('user'))
 
   /**
-   * Get website selector by hostname (guest, user, admin)
+   * Get website selector by hostname (any user-portal role by default)
    */
   .get(
     '/:website',
@@ -45,9 +45,8 @@ export const websiteSelectors = new Elysia({
   )
 
   /**
-   * List / create / update / delete (admin only)
+   * List / create / update / delete (moderator by default)
    */
-  .use(shouldBeAdmin())
   .get(
     '/',
     async ({ prisma }) => {

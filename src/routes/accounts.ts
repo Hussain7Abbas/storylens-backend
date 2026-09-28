@@ -3,12 +3,15 @@ import { Elysia, t } from 'elysia';
 import { auth, googleEnabled } from '@/lib/auth';
 import { mergeGuestInto } from '@/lib/auth/oauth';
 import {
+  authUserInclude,
   createCredentialAccount,
   createSessionToken,
+  deleteSessionToken,
   getUserFromBearerToken,
   toAuthUser,
   verifyCredentialPassword,
 } from '@/lib/auth/session';
+import { SYSTEM_ROLES, systemRoleId } from '@/lib/permissions';
 import {
   consumeRegistration,
   discardRegistration,
@@ -29,7 +32,7 @@ import {
 } from '@/lib/auth/account-change';
 import { sendEmail } from '@/lib/email';
 import { setup } from '@/setup';
-import { shouldBeGuest } from '@/middleware/authorize';
+import { authorize } from '@/middleware/authorize';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
 import bcrypt from 'bcryptjs';
@@ -37,8 +40,8 @@ import bcrypt from 'bcryptjs';
 type Translate = (text: { en: string; ar: string }) => string;
 
 // Only a guest upgrades in place, so only its own row is not a conflict.
-function guestId(user: { id: string; role: string } | null): string | undefined {
-  return user?.role === 'guest' ? user.id : undefined;
+function guestId(user: { id: string; isGuest: boolean } | null): string | undefined {
+  return user?.isGuest ? user.id : undefined;
 }
 
 // A guest registering may keep its own username; any other match is taken.
@@ -77,17 +80,30 @@ async function assertRegistrationAvailable(
   }
 }
 
-type Member = { id: string; email: string; role: string };
+type Member = { id: string; email: string; isGuest: boolean };
 
-// Guests have no verified email, so only users and admins change credentials.
+// Guests have no verified email, so only registered accounts change credentials.
 function requireMember<T extends Member>(currentUser: T | null | undefined): T {
   if (!currentUser) {
     throw new HttpError({ statusCode: 401, message: 'Authentication required' });
   }
-  if (currentUser.role === 'guest') {
-    throw new HttpError({ statusCode: 403, message: 'User role required' });
+  if (currentUser.isGuest) {
+    throw new HttpError({ statusCode: 403, message: 'A registered account is required' });
   }
   return currentUser;
+}
+
+// Dashboard accounts sign in through `/api/admin/auth/login` only.
+function assertReaderPortal(user: { portal: string }, translate: Translate): void {
+  if (user.portal !== 'user') {
+    throw new HttpError({
+      statusCode: 403,
+      message: translate({
+        en: 'This account signs in to the dashboard only',
+        ar: 'هذا الحساب مخصص لتسجيل الدخول إلى لوحة التحكم فقط',
+      }),
+    });
+  }
 }
 
 async function assertEmailAvailable(
@@ -182,6 +198,8 @@ function verifiedChange<K extends AccountChangeKind>(
   return result.change;
 }
 
+// Reader accounts for the extension, website account pages and desktop
+// client, mounted at `/api/user/auth`. Dashboard accounts use `admin/auth.ts`.
 export const accounts = new Elysia({
   prefix: '/auth',
   tags: ['Auth'],
@@ -213,8 +231,11 @@ export const accounts = new Elysia({
           username,
           password: await bcrypt.hash(plainPassword, 12),
           name: username,
-          role: 'guest',
+          portal: 'user',
+          isGuest: true,
+          roleId: await systemRoleId(prisma, SYSTEM_ROLES.guest),
         },
+        include: authUserInclude,
       });
 
       await createCredentialAccount(prisma, user.id, guestEmail, plainPassword);
@@ -330,15 +351,18 @@ export const accounts = new Elysia({
         username: registration.username,
         password: registration.passwordHash,
         name: registration.name,
-        role: 'user' as const,
+        portal: 'user' as const,
+        isGuest: false,
+        roleId: await systemRoleId(prisma, SYSTEM_ROLES.reader),
         emailVerified: true,
       };
 
-      if (currentUser?.role === 'guest') {
+      if (currentUser?.isGuest) {
         const user = await prisma.$transaction(async (tx) => {
           const upgraded = await tx.user.update({
             where: { id: currentUser.id },
             data,
+            include: authUserInclude,
           });
 
           const account = await tx.account.findFirst({
@@ -379,6 +403,7 @@ export const accounts = new Elysia({
             },
           },
         },
+        include: authUserInclude,
       });
 
       const token = await createSessionToken(prisma, user.id);
@@ -400,6 +425,7 @@ export const accounts = new Elysia({
 
       const user = await prisma.user.findUnique({
         where: { email },
+        include: authUserInclude,
       });
 
       if (!user) {
@@ -422,6 +448,8 @@ export const accounts = new Elysia({
           }),
         });
       }
+
+      assertReaderPortal(user, translate);
 
       const token = await createSessionToken(prisma, user.id);
 
@@ -459,13 +487,16 @@ export const accounts = new Elysia({
       }
 
       const guest = await getUserFromBearerToken(prisma, body.guestToken);
-      if (guest?.role === 'guest' && guest.id !== oauth.user.id) {
+      const user = await prisma.user.findUniqueOrThrow({
+        where: { id: oauth.user.id },
+        include: authUserInclude,
+      });
+      assertReaderPortal(user, translate);
+
+      if (guest?.isGuest && guest.id !== oauth.user.id) {
         await mergeGuestInto(prisma, guest.id, oauth.user.id);
       }
 
-      const user = await prisma.user.findUniqueOrThrow({
-        where: { id: oauth.user.id },
-      });
       const token = await createSessionToken(prisma, user.id);
 
       const signOut = await auth.api.signOut({
@@ -484,16 +515,10 @@ export const accounts = new Elysia({
     },
   )
 
-  // Better Auth (OAuth sign-in, callbacks, cookie sessions). Unguarded because
-  // OAuth starts signed out; static routes above and below take precedence.
-  .all('/*', async ({ request }) => auth.handler(request), {
-    detail: {
-      hide: true,
-    },
-  })
+  // Every route below needs a reader session and its route permission.
+  .use(authorize('user'))
 
   // Get current user profile
-  .use(shouldBeGuest())
   .get(
     '/me',
     async ({ currentUser, prisma, t: translate }) => {
@@ -509,14 +534,7 @@ export const accounts = new Elysia({
 
       const user = await prisma.user.findUnique({
         where: { id: currentUser.id },
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          name: true,
-          role: true,
-          createdAt: true,
-        },
+        include: authUserInclude,
       });
 
       if (!user) {
@@ -529,10 +547,16 @@ export const accounts = new Elysia({
         });
       }
 
-      return user;
+      return { ...toAuthUser(user), createdAt: user.createdAt };
     },
     {},
   )
+
+  // End this session (the bearer token stops working).
+  .post('/logout', async ({ prisma, bearer }) => {
+    if (bearer) await deleteSessionToken(prisma, bearer);
+    return { success: true };
+  })
 
   // Update current user profile (username, name)
   .put(
@@ -576,16 +600,10 @@ export const accounts = new Elysia({
       const user = await prisma.user.update({
         where: { id: currentUser.id },
         data,
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          name: true,
-          role: true,
-        },
+        include: authUserInclude,
       });
 
-      return user;
+      return toAuthUser(user);
     },
     {
       body: t.Object({
@@ -685,6 +703,7 @@ export const accounts = new Elysia({
         prisma.user.update({
           where: { id: member.id },
           data: { email, emailVerified: true },
+          include: authUserInclude,
         }),
         prisma.account.updateMany({
           where: { userId: member.id, providerId: 'credential' },
