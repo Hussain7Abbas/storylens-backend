@@ -54,6 +54,8 @@ cp .env.example .env
 | `BETTER_AUTH_SECRET` | Yes | Better Auth signing secret |
 | `BETTER_AUTH_URL` | No | Public base URL for Better Auth |
 | `ROOT_EMAIL` | For seed | Root admin email |
+| `RESEND_API_KEY` | In production | Resend API key for registration codes (codes are logged when unset outside production) |
+| `EMAIL_FROM` | In production | Sender on a Resend-verified domain, e.g. `Story Lens <no-reply@example.com>` |
 | `STORAGE_IMGBB_API_KEY` | Yes | ImgBB API key for file uploads |
 | `OPENROUTER_API_KEY` | For AI | OpenRouter API key |
 | `OPENROUTER_MODEL` | No | Model ID (default: `google/gemini-2.5-flash`) |

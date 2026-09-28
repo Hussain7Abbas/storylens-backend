@@ -6,7 +6,7 @@ Follow [shared repository rules](../../AGENTS.md). This submodule provides the E
 
 - `src/server.ts` composes plugins and route modules; `src/main.ts` listens on the configured port. Put each resource's endpoints in `src/routes/` and register new modules in `server.ts`.
 - `src/setup.ts` adds the Prisma client, locale helper, and current user to route context. Use it in routes that need those values. Auth guards and ownership checks live in `src/middleware/authorize.ts`.
-- `src/lib/` contains database, Better Auth/session, storage, and AI code. `src/plugins/` holds Elysia plugins; `src/schemas/` and Elysia `t` schemas validate API input and describe responses. Use `HttpError` and the existing error handler for expected HTTP failures.
+- `src/lib/` contains database, Better Auth/session, email (Resend), storage, and AI code. Send email only through `sendEmail` in `src/lib/email/`. `src/plugins/` holds Elysia plugins; `src/schemas/` and Elysia `t` schemas validate API input and describe responses. Use `HttpError` and the existing error handler for expected HTTP failures.
 - `prisma/schema.prisma`, `prisma/migrations/`, and `prisma/seed/` own the database schema and data setup. Access the client through `@/lib/db` or the `prisma` route context. Use Prisma transactions for related writes. Generate a development migration after schema changes; do not hand-edit an existing migration.
 - `src/env.ts` validates server configuration. Add environment variables there and update `.env.example`; do not scatter direct `process.env` reads through application code.
 - Follow local module imports (`@/` for `src/`), resource naming, and explicit TypeScript types. Backend formatting is mixed; there is no backend Biome config, so avoid broad format-only changes.
@@ -18,8 +18,9 @@ Enforce access in the API. `shouldBeGuest()` allows authenticated guests, users,
 - Authenticated roles can read novels, keywords, replacements, categories, natures, and chapters.
 - Users can create or change their own keywords, add novel names/slugs, and upload files; admins have full resource management access.
 - Replacement writes, novel deletion, and management of categories, natures, chapters, configs, and website selectors are admin operations, subject to each route's current guard.
-- `POST /auth/login`, `POST /auth/register`, `GET /auth/providers`, `POST /auth/oauth/session`, and the Better Auth `/auth/*` catch-all stay public, ahead of the `shouldBeGuest()` guard; the website's account pages call them without a session.
+- `POST /auth/login`, `POST /auth/register`, `POST /auth/register/verify`, `GET /auth/providers`, `POST /auth/oauth/session`, and the Better Auth `/auth/*` catch-all stay public, ahead of the `shouldBeGuest()` guard; the website's account pages call them without a session.
 - Better Auth handles OAuth only. Keep its credential, profile, and linking endpoints in `disabledPaths` and `username`/`role`/`password` as `input: false`; never let a Better Auth endpoint set a role.
+- Email/password registration creates or upgrades an account only after `POST /auth/register/verify` accepts the emailed code; never create an unverified user or return a session from `/auth/register`.
 - Password changes require a registered user or admin and the current password; update both credential stores atomically.
 - `/health` and `/health/ready` are public and unauthenticated; never return error details, secrets, or user data from them.
 - Guest accounts may update their own profile. Website selector lookup is available to authenticated roles; selector listing and writes require admin access.

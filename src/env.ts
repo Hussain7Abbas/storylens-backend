@@ -20,6 +20,11 @@ export const env = createEnv({
     // Google sign-in is enabled only when both are set.
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
+    // Resend delivers registration codes. Outside production, codes are logged
+    // when these are unset; production registration fails without them.
+    RESEND_API_KEY: z.string().optional(),
+    // Sender on a Resend-verified domain, e.g. `Story Lens <no-reply@example.com>`.
+    EMAIL_FROM: z.string().optional(),
     STORAGE_IMGBB_API_KEY: z.string(),
     OPENROUTER_API_KEY: z.string().optional(),
     OPENROUTER_MODEL: z.string().optional(),

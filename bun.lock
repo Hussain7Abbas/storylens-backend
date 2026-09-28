@@ -23,6 +23,7 @@
         "jsdom": "^29.1.1",
         "linkedom": "^0.18.12",
         "prismabox": "^1.1.25",
+        "resend": "^6.30.0",
         "sharp": "^0.34.4",
         "xpath": "^0.0.34",
         "zod": "^4.1.12",
@@ -189,6 +190,8 @@
     "@prisma/schema-files-loader": ["@prisma/schema-files-loader@7.8.0", "", { "dependencies": { "@prisma/prisma-schema-wasm": "7.8.0-6.3c6e192761c0362d496ed980de936e2f3cebcd3a", "fs-extra": "11.3.0" } }, "sha512-WxCCsgreVggULyP5ElOOHYXjNK9qN+2U15uGRIyRWb87VZWsDZLlYOdC3zR2XKKmkzEq1ncJ5fFWcFyxnNCq7A=="],
 
     "@sinclair/typebox": ["@sinclair/typebox@0.34.49", "", {}, "sha512-brySQQs7Jtn0joV8Xh9ZV/hZb9Ozb0pmazDIASBkYKCjXrXU3mpcFahmK/z4YDhGkQvP9mWJbVyahdtU5wQA+A=="],
+
+    "@stablelib/base64": ["@stablelib/base64@1.0.1", "", {}, "sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
@@ -370,6 +373,8 @@
 
     "fast-deep-equal": ["fast-deep-equal@3.1.3", "", {}, "sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q=="],
 
+    "fast-sha256": ["fast-sha256@1.3.0", "", {}, "sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ=="],
+
     "fast-uri": ["fast-uri@3.1.2", "", {}, "sha512-rVjf7ArG3LTk+FS6Yw81V1DLuZl1bRbNrev6Tmd/9RaroeeRRJhAt7jg/6YFxbvAQXUCavSoZhPPj6oOx+5KjQ=="],
 
     "fetch-blob": ["fetch-blob@3.2.0", "", { "dependencies": { "node-domexception": "^1.0.0", "web-streams-polyfill": "^3.0.3" } }, "sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ=="],
@@ -506,6 +511,8 @@
 
     "pluralize": ["pluralize@8.0.0", "", {}, "sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA=="],
 
+    "postal-mime": ["postal-mime@2.7.6", "", {}, "sha512-UUlyE2KlxmvwMGq060onF/VWU3zD6dVW31FwokQ5v26jWd35fbs2MoTFzh+jXnPwAyV2MULMKXcBInGOl5TO6Q=="],
+
     "prettier": ["prettier@3.8.3", "", { "bin": { "prettier": "bin/prettier.cjs" } }, "sha512-7igPTM53cGHMW8xWuVTydi2KO233VFiTNyF5hLJqpilHfmn8C8gPf+PS7dUT64YcXFbiMGZxS9pCSxL/Dxm/Jw=="],
 
     "prisma": ["prisma@6.19.3", "", { "dependencies": { "@prisma/config": "6.19.3", "@prisma/engines": "6.19.3" }, "peerDependencies": { "typescript": ">=5.1.0" }, "optionalPeers": ["typescript"], "bin": { "prisma": "build/index.js" } }, "sha512-++ZJ0ijLrDJF6hNB4t4uxg2br3fC4H9Yc9tcbjr2fcNFP3rh/SBNrAgjhsqBU4Ght8JPrVofG/ZkXfnSfnYsFg=="],
@@ -535,6 +542,8 @@
     "readdirp": ["readdirp@4.1.2", "", {}, "sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg=="],
 
     "require-from-string": ["require-from-string@2.0.2", "", {}, "sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw=="],
+
+    "resend": ["resend@6.30.0", "", { "dependencies": { "postal-mime": "2.7.6", "standardwebhooks": "1.1.1" }, "peerDependencies": { "@react-email/render": "*" }, "optionalPeers": ["@react-email/render"] }, "sha512-rED9rVw8N6cUvjmpYQwfZKBzd/cgWT+jURekVxtjFV2+YyK2/Tu2JOnE68sgqXlMBSYRoWgI6R0xlx3ANc/xeA=="],
 
     "rou3": ["rou3@0.7.12", "", {}, "sha512-iFE4hLDuloSWcD7mjdCDhx2bKcIsYbtOTpfH5MHHLSKMOUyjqQXTeZVa289uuwEGEKFoE/BAPbhaU4B774nceg=="],
 
@@ -567,6 +576,8 @@
     "sisteransi": ["sisteransi@1.0.5", "", {}, "sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg=="],
 
     "source-map-js": ["source-map-js@1.2.1", "", {}, "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="],
+
+    "standardwebhooks": ["standardwebhooks@1.1.1", "", { "dependencies": { "@stablelib/base64": "^1.0.0", "fast-sha256": "^1.3.0" } }, "sha512-bCbX9ZEyFkWPsRz7Bl3NuQUJohmwGSev/yhr7vhaGPlc4AfIrspIRa6cPTBuI1ItmrTDJ4d/S2hCsfe4+vQGnQ=="],
 
     "statuses": ["statuses@2.0.2", "", {}, "sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw=="],
 
