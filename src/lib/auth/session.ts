@@ -3,16 +3,19 @@ import bcrypt from 'bcryptjs';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
+const roleWithPermissions = {
+  select: {
+    id: true,
+    slug: true,
+    name: true,
+    permissions: { select: { key: true } },
+  },
+} as const;
+
 /** Load a user with this to build its `AuthUserPayload`. */
 export const authUserInclude = {
-  role: {
-    select: {
-      id: true,
-      slug: true,
-      name: true,
-      permissions: { select: { key: true } },
-    },
-  },
+  userRole: roleWithPermissions,
+  adminRole: roleWithPermissions,
 } satisfies Prisma.UserInclude;
 
 export type UserWithAccess = Prisma.UserGetPayload<{ include: typeof authUserInclude }>;
@@ -22,23 +25,41 @@ export type AuthUserPayload = {
   email: string;
   username: string;
   name: string;
-  portal: Portal;
   isGuest: boolean;
+  /** May use the reader API (`/api/user`). */
+  isUser: boolean;
+  /** May use the dashboard API (`/api/admin`). */
+  isAdmin: boolean;
+  /** The API this payload (and its session) is for. */
+  portal: Portal;
+  /** The account's role on `portal`. */
   role: { id: string; slug: string; name: string } | null;
-  /** Permission keys granted by the role, e.g. `GET /api/user/novels/`. */
+  /** Permission keys that role grants, e.g. `GET /api/user/novels/`. */
   permissions: string[];
 };
 
-export function toAuthUser(user: UserWithAccess): AuthUserPayload {
+export function hasPortalAccess(user: Pick<UserWithAccess, 'isUser' | 'isAdmin'>, portal: Portal): boolean {
+  return portal === 'admin' ? user.isAdmin : user.isUser;
+}
+
+/** The user as seen by one API: that portal's role and permissions only. */
+export function toAuthUser(user: UserWithAccess, portal: Portal): AuthUserPayload {
+  const role = hasPortalAccess(user, portal)
+    ? portal === 'admin'
+      ? user.adminRole
+      : user.userRole
+    : null;
   return {
     id: user.id,
     email: user.email,
     username: user.username,
     name: user.name,
-    portal: user.portal,
     isGuest: user.isGuest,
-    role: user.role ? { id: user.role.id, slug: user.role.slug, name: user.role.name } : null,
-    permissions: user.role?.permissions.map((permission) => permission.key) ?? [],
+    isUser: user.isUser,
+    isAdmin: user.isAdmin,
+    portal,
+    role: role ? { id: role.id, slug: role.slug, name: role.name } : null,
+    permissions: role?.permissions.map((permission) => permission.key) ?? [],
   };
 }
 
@@ -60,9 +81,11 @@ export async function createCredentialAccount(
   });
 }
 
+/** Issues a bearer token that only `portal`'s API accepts. */
 export async function createSessionToken(
   prisma: PrismaClient,
   userId: string,
+  portal: Portal,
 ): Promise<string> {
   const token = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
@@ -72,16 +95,19 @@ export async function createSessionToken(
       token,
       expiresAt,
       userId,
+      portal,
     },
   });
 
   return token;
 }
 
-export async function getUserFromBearerToken(
+export type BearerSession = { user: UserWithAccess; portal: Portal };
+
+export async function getSessionFromBearerToken(
   prisma: PrismaClient,
   token: string | undefined,
-): Promise<UserWithAccess | null> {
+): Promise<BearerSession | null> {
   if (!token) {
     return null;
   }
@@ -95,7 +121,7 @@ export async function getUserFromBearerToken(
     return null;
   }
 
-  return session.user;
+  return { user: session.user, portal: session.portal };
 }
 
 export async function verifyCredentialPassword(

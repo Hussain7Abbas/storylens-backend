@@ -59,11 +59,17 @@ export const auth = betterAuth({
         required: false,
         input: false,
       },
-      portal: {
-        type: 'string',
+      isUser: {
+        type: 'boolean',
         required: false,
         input: false,
-        defaultValue: 'user',
+        defaultValue: true,
+      },
+      isAdmin: {
+        type: 'boolean',
+        required: false,
+        input: false,
+        defaultValue: false,
       },
       isGuest: {
         type: 'boolean',
@@ -71,7 +77,12 @@ export const auth = betterAuth({
         input: false,
         defaultValue: false,
       },
-      roleId: {
+      userRoleId: {
+        type: 'string',
+        required: false,
+        input: false,
+      },
+      adminRoleId: {
         type: 'string',
         required: false,
         input: false,
@@ -89,14 +100,15 @@ export const auth = betterAuth({
       create: {
         // OAuth sign-up: the Prisma model needs a unique username and a
         // password hash, and a provider-verified account is a registered
-        // reader. Dashboard accounts are only created from the dashboard.
+        // reader. Dashboard access is only granted from the dashboard.
         before: async (user) => ({
           data: {
             ...user,
             username: await generateUniqueUsername(prisma, user.name),
-            portal: 'user',
+            isUser: true,
+            isAdmin: false,
             isGuest: false,
-            roleId: await systemRoleId(prisma, SYSTEM_ROLES.reader),
+            userRoleId: await systemRoleId(prisma, SYSTEM_ROLES.reader),
             password: await bcrypt.hash(crypto.randomUUID(), 12),
           },
         }),

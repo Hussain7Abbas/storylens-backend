@@ -20,8 +20,8 @@ enum FileType {
   Video
 }
 
-// Which API a user signs in to: `admin` is the dashboard (`/api/admin`),
-// `user` is the extension and desktop client (`/api/user`).
+// The two APIs: `admin` is the dashboard (`/api/admin`), `user` is the
+// extension, website account pages and desktop client (`/api/user`).
 enum Portal {
   admin
   user
@@ -46,12 +46,16 @@ model User {
   // Provider profile picture URL; Better Auth writes it on OAuth sign-up.
   image String?
 
-  // Authorization: the portal selects the API, the role grants permissions in it.
-  portal  Portal  @default(user)
+  // Authorization: one account may use both APIs. Each flag enables a portal
+  // and that portal's role grants the permissions there.
+  isUser      Boolean @default(true)
+  userRoleId  String?
+  userRole    Role?   @relation("UserRole", fields: [userRoleId], references: [id], onDelete: SetNull)
+  isAdmin     Boolean @default(false)
+  adminRoleId String?
+  adminRole   Role?   @relation("AdminRole", fields: [adminRoleId], references: [id], onDelete: SetNull)
   // Anonymous extension install; verified registration or OAuth clears it.
-  isGuest Boolean @default(false)
-  roleId  String?
-  role    Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  isGuest     Boolean @default(false)
 
   avatarId String?
   avatar   File?   @relation(fields: [avatarId], references: [id], name: "UserAvatars")
@@ -89,7 +93,9 @@ model Role {
 
   // Relations
   permissions Permission[] @relation("RolePermissions")
-  users       User[]
+  // A role is used through the relation matching its portal.
+  readers     User[]       @relation("UserRole")
+  admins      User[]       @relation("AdminRole")
 
   @@index([portal])
 }
@@ -127,6 +133,8 @@ model Session {
   userAgent String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // The API this token was issued for; it is rejected by the other one.
+  portal    Portal   @default(user)
 
   @@index([userId])
   @@map("session")

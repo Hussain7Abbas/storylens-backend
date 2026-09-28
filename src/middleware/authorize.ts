@@ -16,13 +16,13 @@ function forbidden(message = 'Insufficient permissions'): never {
 }
 
 const PORTAL_MISMATCH: Record<Portal, string> = {
-  admin: 'A dashboard account is required',
-  user: 'A reader account is required',
+  admin: 'Sign in to the dashboard with an account that has dashboard access',
+  user: 'Sign in with an account that has reader access',
 };
 
 /**
- * Signs the caller in to one portal and checks that their role holds the
- * permission of the matched route (`METHOD /api/{portal}/...`). Use it once per
+ * Requires a session issued for `portal`, an account with access to it, and
+ * that portal's role holding the permission of the matched route (`METHOD /api/{portal}/...`). Use it once per
  * route module, after `.use(setup)` and that module's public routes. It
  * derives (rather than resolves) so signed-out callers get 401 before input
  * validation runs.
@@ -35,7 +35,9 @@ export function authorize(portal: Portal) {
         unauthorized();
       }
 
-      if (currentUser.portal !== portal) {
+      // The session must be issued for this API and the account allowed on it.
+      const allowed = portal === 'admin' ? currentUser.isAdmin : currentUser.isUser;
+      if (currentUser.portal !== portal || !allowed) {
         forbidden(PORTAL_MISMATCH[portal]);
       }
 

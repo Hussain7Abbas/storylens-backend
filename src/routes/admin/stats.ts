@@ -6,7 +6,8 @@ const recentUserSchema = t.Object({
   id: t.String(),
   username: t.String(),
   email: t.String(),
-  portal: t.Union([t.Literal('admin'), t.Literal('user')]),
+  isUser: t.Boolean(),
+  isAdmin: t.Boolean(),
   isGuest: t.Boolean(),
   createdAt: t.Date(),
 });
@@ -38,9 +39,9 @@ export const adminStats = new Elysia({ prefix: '/stats', tags: ['Admin: Overview
         recentUsers,
         recentNovels,
       ] = await Promise.all([
-        prisma.user.count({ where: { portal: 'user', isGuest: false } }),
-        prisma.user.count({ where: { portal: 'user', isGuest: true } }),
-        prisma.user.count({ where: { portal: 'admin' } }),
+        prisma.user.count({ where: { isUser: true, isGuest: false } }),
+        prisma.user.count({ where: { isUser: true, isGuest: true } }),
+        prisma.user.count({ where: { isAdmin: true } }),
         prisma.user.count({ where: { createdAt: { gte: since } } }),
         prisma.novel.count(),
         prisma.keyword.count(),
@@ -50,7 +51,7 @@ export const adminStats = new Elysia({ prefix: '/stats', tags: ['Admin: Overview
         prisma.user.findMany({
           orderBy: { createdAt: 'desc' },
           take: 6,
-          select: { id: true, username: true, email: true, portal: true, isGuest: true, createdAt: true },
+          select: { id: true, username: true, email: true, isUser: true, isAdmin: true, isGuest: true, createdAt: true },
         }),
         prisma.novel.findMany({
           orderBy: { createdAt: 'desc' },

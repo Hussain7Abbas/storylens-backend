@@ -4,8 +4,8 @@ import { Elysia } from 'elysia';
 import { HttpError } from '@/utils/errors';
 import { fakeRoles, sessionUser, withRole } from './access';
 
-type Row = { id: string; email: string; username: string; name: string; portal: 'admin' | 'user'; isGuest: boolean; roleId: string | null; password: string; emailVerified?: boolean };
-const guest: Row = { id: 'guest-id', email: 'guest@guest.storylens.local', username: 'guest', name: 'guest', portal: 'user', isGuest: true, roleId: 'role-guest', password: '' };
+type Row = { id: string; email: string; username: string; name: string; isUser: boolean; isAdmin: boolean; isGuest: boolean; userRoleId: string | null; adminRoleId?: string | null; password: string; emailVerified?: boolean };
+const guest: Row = { id: 'guest-id', email: 'guest@guest.storylens.local', username: 'guest', name: 'guest', isUser: true, isAdmin: false, isGuest: true, userRoleId: 'role-guest', password: '' };
 type VerificationRow = { id: string; identifier: string; value: string; expiresAt: Date; createdAt: Date };
 let users: Row[] = [];
 let sessions = 0;
@@ -80,8 +80,8 @@ beforeEach(async () => {
  deliver = true;
  users = [
   withRole({ ...guest }),
-  withRole({ id: 'reader-id', email: 'reader@example.com', username: 'reader', name: 'Reader', portal: 'user', isGuest: false, roleId: 'role-reader', password: await bcrypt.hash('reader-pass', 4) }),
-  withRole({ id: 'admin-id', email: 'admin@example.com', username: 'admin', name: 'Admin', portal: 'admin', isGuest: false, roleId: null, password: await bcrypt.hash('admin-pass', 4) }),
+  withRole({ id: 'reader-id', email: 'reader@example.com', username: 'reader', name: 'Reader', isUser: true, isAdmin: false, isGuest: false, userRoleId: 'role-reader', password: await bcrypt.hash('reader-pass', 4) }),
+  withRole({ id: 'admin-id', email: 'admin@example.com', username: 'admin', name: 'Admin', isUser: false, isAdmin: true, isGuest: false, userRoleId: null, adminRoleId: null, password: await bcrypt.hash('admin-pass', 4) }),
  ];
 });
 describe('sign-in and registration without a session', () => {
@@ -176,7 +176,7 @@ describe('sign-in and registration without a session', () => {
  });
  it('rechecks availability when the code is verified', async () => {
   await post('register', { email: 'new@example.com', password: 'new-password', username: 'newbie' });
-  users.push(withRole({ id: 'racer', email: 'racer@example.com', username: 'newbie', name: 'Racer', portal: 'user', isGuest: false, roleId: 'role-reader', password: '' }));
+  users.push(withRole({ id: 'racer', email: 'racer@example.com', username: 'newbie', name: 'Racer', isUser: true, isAdmin: false, isGuest: false, userRoleId: 'role-reader', password: '' }));
   const response = await post('register/verify', { email: 'new@example.com', code: codeFrom(0) });
   expect(response.status).toBe(400);
   expect((await response.json() as { message: string }).message).toBe('Username already taken');

@@ -9,7 +9,7 @@ import { sanitize } from '@/utils/sanitize';
 
 const roleInclude = {
   permissions: { select: { id: true } },
-  _count: { select: { users: true } },
+  _count: { select: { readers: true, admins: true } },
 } satisfies Prisma.RoleInclude;
 
 type RoleRow = Prisma.RoleGetPayload<{ include: typeof roleInclude }>;
@@ -17,7 +17,7 @@ type RoleRow = Prisma.RoleGetPayload<{ include: typeof roleInclude }>;
 function toRole({ permissions, _count, ...role }: RoleRow) {
   return {
     ...role,
-    userCount: _count.users,
+    userCount: _count.readers + _count.admins,
     permissionIds: permissions.map((permission) => permission.id),
   };
 }
@@ -170,10 +170,11 @@ export const adminRoles = new Elysia({ prefix: '/roles', tags: ['Admin: Roles'] 
       if (role.isSystem) {
         throw new HttpError({ statusCode: 409, message: 'System roles cannot be deleted' });
       }
-      if (role._count.users > 0) {
+      const userCount = role._count.readers + role._count.admins;
+      if (userCount > 0) {
         throw new HttpError({
           statusCode: 409,
-          message: `Move this role's ${role._count.users} user(s) to another role first`,
+          message: `Move this role's ${userCount} user(s) to another role first`,
         });
       }
 

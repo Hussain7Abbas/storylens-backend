@@ -3,16 +3,12 @@ import bcrypt from 'bcryptjs';
 import { Elysia, t } from 'elysia';
 import { SYSTEM_ROLES } from '@/lib/permissions';
 import { authorize } from '@/middleware/authorize';
-import {
-  adminListQuery,
-  adminUserSchema,
-  pageArgs,
-  portalSchema,
-  successSchema,
-} from '@/schemas/admin';
+import { adminListQuery, adminUserSchema, pageArgs, portalSchema, successSchema } from '@/schemas/admin';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
+
+const roleSummary = { select: { id: true, slug: true, name: true } } as const;
 
 const userSelect = {
   id: true,
@@ -21,15 +17,26 @@ const userSelect = {
   username: true,
   name: true,
   image: true,
-  portal: true,
   isGuest: true,
-  roleId: true,
-  role: { select: { id: true, slug: true, name: true } },
+  isUser: true,
+  userRoleId: true,
+  userRole: roleSummary,
+  isAdmin: true,
+  adminRoleId: true,
+  adminRole: roleSummary,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;
 
 type Db = Pick<PrismaClient, 'user' | 'role'>;
+
+/** Which APIs an account may use, and its role on each. */
+type Access = {
+  isUser: boolean;
+  userRoleId: string | null;
+  isAdmin: boolean;
+  adminRoleId: string | null;
+};
 
 function notFound(): never {
   throw new HttpError({ statusCode: 404, message: 'User not found' });
@@ -41,7 +48,24 @@ async function assertRoleForPortal(prisma: Db, roleId: string, portal: Portal): 
     throw new HttpError({ statusCode: 404, message: 'Role not found' });
   }
   if (role.portal !== portal) {
-    throw new HttpError({ message: `This role belongs to the ${role.portal} portal` });
+    throw new HttpError({
+      message: portal === 'admin' ? 'Choose a dashboard role for dashboard access' : 'Choose a reader role for reader access',
+    });
+  }
+}
+
+/** Every account uses at least one API, with a role of that API's portal. */
+async function assertAccess(prisma: Db, access: Access): Promise<void> {
+  if (!access.isUser && !access.isAdmin) {
+    throw new HttpError({ message: 'Give the account reader access, dashboard access, or both' });
+  }
+  if (access.isUser) {
+    if (!access.userRoleId) throw new HttpError({ message: 'Reader access needs a reader role' });
+    await assertRoleForPortal(prisma, access.userRoleId, 'user');
+  }
+  if (access.isAdmin) {
+    if (!access.adminRoleId) throw new HttpError({ message: 'Dashboard access needs a dashboard role' });
+    await assertRoleForPortal(prisma, access.adminRoleId, 'admin');
   }
 }
 
@@ -65,20 +89,30 @@ async function assertUnique(
 }
 
 /** The dashboard must always keep one super admin who can sign in. */
-async function assertNotLastSuperAdmin(prisma: Db, userId: string): Promise<void> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: { select: { slug: true } } },
-  });
-  if (user?.role?.slug !== SYSTEM_ROLES.superAdmin) return;
+async function assertKeepsSuperAdmin(prisma: Db, userId: string, next: Access | null): Promise<void> {
+  const superAdminId = (await prisma.role.findUnique({ where: { slug: SYSTEM_ROLES.superAdmin }, select: { id: true } }))?.id;
+  if (!superAdminId) return;
 
-  const superAdmins = await prisma.user.count({
-    where: { portal: 'admin', role: { slug: SYSTEM_ROLES.superAdmin } },
+  const current = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isAdmin: true, adminRoleId: true },
   });
+  const isSuperAdmin = current?.isAdmin && current.adminRoleId === superAdminId;
+  const staysSuperAdmin = next?.isAdmin && next.adminRoleId === superAdminId;
+  if (!isSuperAdmin || staysSuperAdmin) return;
+
+  const superAdmins = await prisma.user.count({ where: { isAdmin: true, adminRoleId: superAdminId } });
   if (superAdmins <= 1) {
     throw new HttpError({ statusCode: 409, message: 'The last super admin cannot be removed' });
   }
 }
+
+const accessBody = {
+  isUser: t.Boolean(),
+  userRoleId: t.Optional(t.Nullable(t.String())),
+  isAdmin: t.Boolean(),
+  adminRoleId: t.Optional(t.Nullable(t.String())),
+};
 
 export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] })
   .use(setup)
@@ -89,18 +123,21 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
     async ({ prisma, query }) => {
       const search = query.search?.trim();
       const where: Prisma.UserWhereInput = {
-        portal: query.portal,
-        roleId: query.roleId,
-        isGuest: query.guests === undefined ? undefined : query.guests,
-        ...(search
-          ? {
-              OR: [
-                { email: { contains: search, mode: 'insensitive' } },
-                { username: { contains: search, mode: 'insensitive' } },
-                { name: { contains: search, mode: 'insensitive' } },
-              ],
-            }
-          : {}),
+        AND: [
+          query.access === 'admin' ? { isAdmin: true } : {},
+          query.access === 'user' ? { isUser: true } : {},
+          query.roleId ? { OR: [{ userRoleId: query.roleId }, { adminRoleId: query.roleId }] } : {},
+          query.guests === undefined ? {} : { isGuest: query.guests },
+          search
+            ? {
+                OR: [
+                  { email: { contains: search, mode: 'insensitive' } },
+                  { username: { contains: search, mode: 'insensitive' } },
+                  { name: { contains: search, mode: 'insensitive' } },
+                ],
+              }
+            : {},
+        ],
       };
 
       const [data, total] = await Promise.all([
@@ -117,7 +154,7 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
     {
       query: t.Object({
         ...adminListQuery,
-        portal: t.Optional(portalSchema),
+        access: t.Optional(portalSchema),
         roleId: t.Optional(t.String()),
         guests: t.Optional(t.BooleanString()),
       }),
@@ -140,15 +177,21 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
     },
   )
 
-  // The only way to create a dashboard account; reader accounts may also be
-  // created here, already verified.
+  // The only way to grant dashboard access to a new account; reader-only
+  // accounts may also be created here, already verified.
   .post(
     '/',
     async ({ prisma, body }) => {
       const email = sanitize(body.email).toLowerCase();
       const username = sanitize(body.username);
+      const access: Access = {
+        isUser: body.isUser,
+        userRoleId: body.isUser ? (body.userRoleId ?? null) : null,
+        isAdmin: body.isAdmin,
+        adminRoleId: body.isAdmin ? (body.adminRoleId ?? null) : null,
+      };
       await assertUnique(prisma, { email, username });
-      await assertRoleForPortal(prisma, body.roleId, body.portal);
+      await assertAccess(prisma, access);
 
       const password = await bcrypt.hash(body.password, 12);
       return prisma.user.create({
@@ -158,9 +201,8 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
           name: sanitize(body.name),
           password,
           emailVerified: true,
-          portal: body.portal,
           isGuest: false,
-          roleId: body.roleId,
+          ...access,
           accounts: {
             create: { accountId: email, providerId: 'credential', password },
           },
@@ -174,8 +216,7 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
         username: t.String({ minLength: 3, maxLength: 30 }),
         name: t.String({ minLength: 1, maxLength: 100 }),
         password: t.String({ minLength: 8, maxLength: 72 }),
-        portal: portalSchema,
-        roleId: t.String(),
+        ...accessBody,
       }),
       response: { 200: adminUserSchema },
       detail: { summary: 'Create a user' },
@@ -188,18 +229,21 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
       const existing = await prisma.user.findUnique({ where: { id } });
       if (!existing) notFound();
 
-      const portal = body.portal ?? existing.portal;
-      const roleId = body.roleId ?? existing.roleId;
-      const accessChanged = portal !== existing.portal || roleId !== existing.roleId;
+      const isUser = body.isUser ?? existing.isUser;
+      const isAdmin = body.isAdmin ?? existing.isAdmin;
+      const access: Access = {
+        isUser,
+        userRoleId: isUser ? (body.userRoleId === undefined ? existing.userRoleId : body.userRoleId) : null,
+        isAdmin,
+        adminRoleId: isAdmin ? (body.adminRoleId === undefined ? existing.adminRoleId : body.adminRoleId) : null,
+      };
 
-      if (accessChanged && id === authedUser.id) {
-        throw new HttpError({ statusCode: 409, message: 'You cannot change your own portal or role' });
+      const adminAccessChanged = access.isAdmin !== existing.isAdmin || access.adminRoleId !== existing.adminRoleId;
+      if (adminAccessChanged && id === authedUser.id) {
+        throw new HttpError({ statusCode: 409, message: 'You cannot change your own dashboard access or role' });
       }
-      if (accessChanged) {
-        if (!roleId) throw new HttpError({ message: 'A role is required' });
-        await assertRoleForPortal(prisma, roleId, portal);
-        await assertNotLastSuperAdmin(prisma, id);
-      }
+      await assertAccess(prisma, access);
+      if (adminAccessChanged) await assertKeepsSuperAdmin(prisma, id, access);
 
       const email = body.email ? sanitize(body.email).toLowerCase() : undefined;
       const username = body.username ? sanitize(body.username) : undefined;
@@ -215,10 +259,9 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
             username,
             name: body.name ? sanitize(body.name) : undefined,
             password,
-            portal,
-            roleId,
-            // An account moved to the dashboard, or given a password, is no longer anonymous.
-            isGuest: portal === 'admin' || password ? false : undefined,
+            ...access,
+            // Dashboard access or a password makes an anonymous install a real account.
+            isGuest: access.isAdmin || password ? false : undefined,
           },
           select: userSelect,
         }),
@@ -226,9 +269,10 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
           where: { userId: id, providerId: 'credential' },
           data: { accountId: email, password },
         }),
-        // New credentials or access end the user's existing sessions.
+        // A new password ends every session of the account. Access changes
+        // apply at once without this: each request re-checks access and role.
         prisma.session.deleteMany({
-          where: password || accessChanged ? { userId: id } : { id: '' },
+          where: password ? { userId: id } : { id: '' },
         }),
       ]);
       return user;
@@ -240,8 +284,10 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
         username: t.Optional(t.String({ minLength: 3, maxLength: 30 })),
         name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
         password: t.Optional(t.String({ minLength: 8, maxLength: 72 })),
-        portal: t.Optional(portalSchema),
-        roleId: t.Optional(t.String()),
+        isUser: t.Optional(t.Boolean()),
+        userRoleId: t.Optional(t.Nullable(t.String())),
+        isAdmin: t.Optional(t.Boolean()),
+        adminRoleId: t.Optional(t.Nullable(t.String())),
       }),
       response: { 200: adminUserSchema },
       detail: { summary: 'Update a user' },
@@ -257,7 +303,7 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
     {
       params: t.Object({ id: t.String() }),
       response: { 200: successSchema },
-      detail: { summary: "Sign a user out everywhere" },
+      detail: { summary: 'Sign a user out everywhere' },
     },
   )
 
@@ -269,7 +315,7 @@ export const adminUsers = new Elysia({ prefix: '/users', tags: ['Admin: Users'] 
       }
       const user = await prisma.user.findUnique({ where: { id }, select: userSelect });
       if (!user) notFound();
-      await assertNotLastSuperAdmin(prisma, id);
+      await assertKeepsSuperAdmin(prisma, id, null);
 
       await prisma.user.delete({ where: { id } });
       return user;

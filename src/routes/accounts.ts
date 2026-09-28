@@ -7,7 +7,7 @@ import {
   createCredentialAccount,
   createSessionToken,
   deleteSessionToken,
-  getUserFromBearerToken,
+  getSessionFromBearerToken,
   toAuthUser,
   verifyCredentialPassword,
 } from '@/lib/auth/session';
@@ -93,14 +93,15 @@ function requireMember<T extends Member>(currentUser: T | null | undefined): T {
   return currentUser;
 }
 
-// Dashboard accounts sign in through `/api/admin/auth/login` only.
-function assertReaderPortal(user: { portal: string }, translate: Translate): void {
-  if (user.portal !== 'user') {
+// Accounts without reader access (dashboard-only) can't use the reader API;
+// a dashboard user can grant it from the Users page.
+function assertReaderPortal(user: { isUser: boolean }, translate: Translate): void {
+  if (!user.isUser) {
     throw new HttpError({
       statusCode: 403,
       message: translate({
-        en: 'This account signs in to the dashboard only',
-        ar: 'هذا الحساب مخصص لتسجيل الدخول إلى لوحة التحكم فقط',
+        en: 'This account does not have reader access',
+        ar: 'لا يملك هذا الحساب صلاحية القارئ',
       }),
     });
   }
@@ -231,18 +232,18 @@ export const accounts = new Elysia({
           username,
           password: await bcrypt.hash(plainPassword, 12),
           name: username,
-          portal: 'user',
+          isUser: true,
           isGuest: true,
-          roleId: await systemRoleId(prisma, SYSTEM_ROLES.guest),
+          userRoleId: await systemRoleId(prisma, SYSTEM_ROLES.guest),
         },
         include: authUserInclude,
       });
 
       await createCredentialAccount(prisma, user.id, guestEmail, plainPassword);
-      const token = await createSessionToken(prisma, user.id);
+      const token = await createSessionToken(prisma, user.id, 'user');
 
       return {
-        user: toAuthUser(user),
+        user: toAuthUser(user, 'user'),
         token,
       };
     },
@@ -351,9 +352,9 @@ export const accounts = new Elysia({
         username: registration.username,
         password: registration.passwordHash,
         name: registration.name,
-        portal: 'user' as const,
+        isUser: true,
         isGuest: false,
-        roleId: await systemRoleId(prisma, SYSTEM_ROLES.reader),
+        userRoleId: await systemRoleId(prisma, SYSTEM_ROLES.reader),
         emailVerified: true,
       };
 
@@ -388,8 +389,8 @@ export const accounts = new Elysia({
           return upgraded;
         });
 
-        const token = await createSessionToken(prisma, user.id);
-        return { user: toAuthUser(user), token };
+        const token = await createSessionToken(prisma, user.id, 'user');
+        return { user: toAuthUser(user, 'user'), token };
       }
 
       const user = await prisma.user.create({
@@ -406,8 +407,8 @@ export const accounts = new Elysia({
         include: authUserInclude,
       });
 
-      const token = await createSessionToken(prisma, user.id);
-      return { user: toAuthUser(user), token };
+      const token = await createSessionToken(prisma, user.id, 'user');
+      return { user: toAuthUser(user, 'user'), token };
     },
     {
       body: t.Object({
@@ -451,10 +452,10 @@ export const accounts = new Elysia({
 
       assertReaderPortal(user, translate);
 
-      const token = await createSessionToken(prisma, user.id);
+      const token = await createSessionToken(prisma, user.id, 'user');
 
       return {
-        user: toAuthUser(user),
+        user: toAuthUser(user, 'user'),
         token,
       };
     },
@@ -486,7 +487,7 @@ export const accounts = new Elysia({
         });
       }
 
-      const guest = await getUserFromBearerToken(prisma, body.guestToken);
+      const guest = (await getSessionFromBearerToken(prisma, body.guestToken))?.user;
       const user = await prisma.user.findUniqueOrThrow({
         where: { id: oauth.user.id },
         include: authUserInclude,
@@ -497,7 +498,7 @@ export const accounts = new Elysia({
         await mergeGuestInto(prisma, guest.id, oauth.user.id);
       }
 
-      const token = await createSessionToken(prisma, user.id);
+      const token = await createSessionToken(prisma, user.id, 'user');
 
       const signOut = await auth.api.signOut({
         headers: request.headers,
@@ -506,7 +507,7 @@ export const accounts = new Elysia({
       const cookies = signOut.headers.getSetCookie();
       if (cookies.length > 0) set.headers['set-cookie'] = cookies;
 
-      return { user: toAuthUser(user), token };
+      return { user: toAuthUser(user, 'user'), token };
     },
     {
       body: t.Object({
@@ -547,7 +548,7 @@ export const accounts = new Elysia({
         });
       }
 
-      return { ...toAuthUser(user), createdAt: user.createdAt };
+      return { ...toAuthUser(user, 'user'), createdAt: user.createdAt };
     },
     {},
   )
@@ -603,7 +604,7 @@ export const accounts = new Elysia({
         include: authUserInclude,
       });
 
-      return toAuthUser(user);
+      return toAuthUser(user, 'user');
     },
     {
       body: t.Object({
@@ -714,7 +715,7 @@ export const accounts = new Elysia({
       // Best effort: the change already succeeded.
       await sendEmail(emailChangedNotice(member.email, email, translate));
 
-      return toAuthUser(user);
+      return toAuthUser(user, 'user');
     },
     {
       body: t.Object({

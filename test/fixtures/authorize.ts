@@ -2,11 +2,22 @@ import { describe, expect, it, mock } from 'bun:test';
 import { Elysia } from 'elysia';
 import { HttpError } from '@/utils/errors';
 
-type SessionUser = { id: string; portal: 'admin' | 'user'; permissions: string[] };
+type SessionUser = { id: string; portal: 'admin' | 'user'; isUser: boolean; isAdmin: boolean; permissions: string[] };
 const sessions: Record<string, SessionUser> = {
-  reader: { id: 'reader', portal: 'user', permissions: ['GET /api/user/things/:id'] },
-  moderator: { id: 'moderator', portal: 'user', permissions: ['GET /api/user/things/:id', 'user:moderate'] },
-  admin: { id: 'admin', portal: 'admin', permissions: ['GET /api/user/things/:id', 'GET /api/admin/things/'] },
+  reader: { id: 'reader', portal: 'user', isUser: true, isAdmin: false, permissions: ['GET /api/user/things/:id'] },
+  moderator: {
+    id: 'moderator',
+    portal: 'user',
+    isUser: true,
+    isAdmin: false,
+    permissions: ['GET /api/user/things/:id', 'user:moderate'],
+  },
+  admin: { id: 'admin', portal: 'admin', isUser: false, isAdmin: true, permissions: ['GET /api/admin/things/'] },
+  // One account with both kinds of access, signed in through each API.
+  bothOnReader: { id: 'both', portal: 'user', isUser: true, isAdmin: true, permissions: ['GET /api/user/things/:id'] },
+  bothOnDashboard: { id: 'both', portal: 'admin', isUser: true, isAdmin: true, permissions: ['GET /api/admin/things/'] },
+  // Dashboard access was revoked after the token was issued.
+  revokedAdmin: { id: 'revoked', portal: 'admin', isUser: true, isAdmin: false, permissions: ['GET /api/admin/things/'] },
 };
 mock.module('@/setup', () => ({
   setup: new Elysia({ name: 'setup' }).derive({ as: 'scoped' }, ({ headers }) => ({
@@ -63,6 +74,16 @@ describe('authorize', () => {
     expect((await call('GET', '/api/user/things/1', 'admin')).status).toBe(403);
     expect((await call('GET', '/api/admin/things/', 'reader')).status).toBe(403);
     expect((await call('GET', '/api/admin/things/', 'admin')).status).toBe(200);
+  });
+  it('lets one account use both APIs, each through a session issued for it', async () => {
+    expect((await call('GET', '/api/user/things/1', 'bothOnReader')).status).toBe(200);
+    expect((await call('GET', '/api/admin/things/', 'bothOnDashboard')).status).toBe(200);
+    // A reader-portal token never opens the dashboard, even for a dashboard user.
+    expect((await call('GET', '/api/admin/things/', 'bothOnReader')).status).toBe(403);
+    expect((await call('GET', '/api/user/things/1', 'bothOnDashboard')).status).toBe(403);
+  });
+  it('rejects a session whose portal access was revoked', async () => {
+    expect((await call('GET', '/api/admin/things/', 'revokedAdmin')).status).toBe(403);
   });
   it('lets moderators change what others created', () => {
     const asAuthed = (id: string) => ({ ...sessions[id], email: '', username: '', name: '', isGuest: false, role: null }) as Parameters<typeof canModerate>[0];

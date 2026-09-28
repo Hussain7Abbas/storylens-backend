@@ -4,10 +4,10 @@ import { Elysia } from 'elysia';
 import { HttpError } from '@/utils/errors';
 import { sessionUser, withRole } from './access';
 
-type Row = { id: string; email: string; username: string; name: string; portal: 'admin' | 'user'; isGuest: boolean; roleId: string | null; password: string; emailVerified?: boolean };
+type Row = { id: string; email: string; username: string; name: string; isUser: boolean; isAdmin: boolean; isGuest: boolean; userRoleId: string | null; adminRoleId?: string | null; password: string; emailVerified?: boolean };
 type VerificationRow = { id: string; identifier: string; value: string; expiresAt: Date; createdAt: Date };
 type VerificationWhere = { id?: string; identifier?: string; value?: string };
-const baseUser: Row = { id: 'user-id', email: 'reader@example.com', username: 'reader', name: 'Reader', portal: 'user', isGuest: false, roleId: 'role-reader', password: '' };
+const baseUser: Row = { id: 'user-id', email: 'reader@example.com', username: 'reader', name: 'Reader', isUser: true, isAdmin: false, isGuest: false, userRoleId: 'role-reader', password: '' };
 let users: Row[] = [];
 let currentRoleId = 'role-reader';
 let hashedPassword: string;
@@ -49,7 +49,7 @@ mock.module('@/setup', () => ({ setup: new Elysia({ name: 'setup' })
  .decorate('prisma', fakePrisma)
  .derive({ as: 'scoped' }, ({ headers }) => ({
   currentUser: headers.authorization
-   ? sessionUser({ ...(users[0] ?? baseUser), roleId: currentRoleId, isGuest: currentRoleId === 'role-guest' })
+   ? sessionUser({ ...(users[0] ?? baseUser), userRoleId: currentRoleId, isGuest: currentRoleId === 'role-guest' })
    : null,
   t: ({ en }: { en: string; ar: string }) => en,
  })) }));

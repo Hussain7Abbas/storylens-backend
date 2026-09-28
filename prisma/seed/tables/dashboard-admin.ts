@@ -4,8 +4,11 @@ import { env } from '@/env';
 import { SYSTEM_ROLES, systemRoleId } from '@/lib/permissions';
 
 /**
- * Creates or resets the dashboard's super admin (the only seeded account).
- * Other dashboard accounts are created from the dashboard itself.
+ * Makes `DASHBOARD_ADMIN_EMAIL` a dashboard super admin (the only seeded
+ * dashboard access). An existing account with that email keeps its reader
+ * access and gains dashboard access; its password is left alone unless the
+ * account is dashboard-only, which this resets. A new account is created
+ * with `DASHBOARD_ADMIN_USERNAME` and `DASHBOARD_ADMIN_PASSWORD`.
  */
 export async function seedDashboardAdmin(prisma: PrismaClient) {
   console.log('🌱', 'Seeding dashboard super admin');
@@ -20,45 +23,54 @@ export async function seedDashboardAdmin(prisma: PrismaClient) {
     );
   }
 
-  const existing = await prisma.user.findFirst({
-    where: { OR: [{ email }, { username }] },
-    select: { id: true, portal: true },
+  const adminRoleId = await systemRoleId(prisma, SYSTEM_ROLES.superAdmin);
+  const existing = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, isUser: true },
   });
-  if (existing && existing.portal !== 'admin') {
-    throw new Error(
-      `A reader account already uses ${email} or ${username}; choose another dashboard email and username`,
+
+  if (existing) {
+    const resetPassword = !existing.isUser;
+    const hashedPassword = resetPassword ? await bcrypt.hash(password, 12) : undefined;
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: existing.id },
+        data: { isAdmin: true, adminRoleId, isGuest: false, emailVerified: true, password: hashedPassword },
+      }),
+      prisma.account.updateMany({
+        where: { userId: existing.id, providerId: 'credential' },
+        data: { password: hashedPassword },
+      }),
+    ]);
+    console.log(
+      '🌱',
+      resetPassword
+        ? `Reset dashboard-only account ${email}`
+        : `Granted dashboard access to ${email}; it keeps its current password`,
     );
+    return;
+  }
+
+  const taken = await prisma.user.findUnique({ where: { username }, select: { id: true } });
+  if (taken) {
+    throw new Error(`Username ${username} belongs to another account; choose another DASHBOARD_ADMIN_USERNAME`);
   }
 
   const hashedPassword = await bcrypt.hash(password, 12);
-  const roleId = await systemRoleId(prisma, SYSTEM_ROLES.superAdmin);
-  const data = {
-    email,
-    username,
-    password: hashedPassword,
-    emailVerified: true,
-    portal: 'admin' as const,
-    isGuest: false,
-    roleId,
-  };
-
-  await prisma.$transaction(async (tx) => {
-    const user = existing
-      ? await tx.user.update({ where: { id: existing.id }, data })
-      : await tx.user.create({ data: { ...data, name: 'Super Admin' } });
-
-    const account = await tx.account.findFirst({
-      where: { userId: user.id, providerId: 'credential' },
-    });
-    if (account) {
-      await tx.account.update({
-        where: { id: account.id },
-        data: { accountId: email, password: hashedPassword },
-      });
-    } else {
-      await tx.account.create({
-        data: { accountId: email, providerId: 'credential', userId: user.id, password: hashedPassword },
-      });
-    }
+  await prisma.user.create({
+    data: {
+      email,
+      username,
+      name: 'Super Admin',
+      password: hashedPassword,
+      emailVerified: true,
+      isGuest: false,
+      isUser: false,
+      isAdmin: true,
+      adminRoleId,
+      accounts: {
+        create: { accountId: email, providerId: 'credential', password: hashedPassword },
+      },
+    },
   });
 }

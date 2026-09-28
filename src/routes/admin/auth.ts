@@ -13,8 +13,8 @@ import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
 
-// Dashboard sign-in. There is no registration: dashboard accounts are created
-// by other dashboard users (`POST /api/admin/users`) or the seed.
+// Dashboard sign-in. There is no registration: dashboard access is granted by
+// other dashboard users (`POST`/`PUT /api/admin/users`) or the seed.
 export const adminAuth = new Elysia({ prefix: '/auth', tags: ['Admin: Auth'] })
   .use(setup)
 
@@ -27,15 +27,16 @@ export const adminAuth = new Elysia({ prefix: '/auth', tags: ['Admin: Auth'] })
         include: authUserInclude,
       });
 
-      // Same answer for unknown emails, wrong passwords and reader accounts.
+      // Same answer for unknown emails, wrong passwords and accounts without
+      // dashboard access.
       const valid =
-        user?.portal === 'admin' && (await verifyCredentialPassword(prisma, user.id, body.password));
+        user?.isAdmin === true && (await verifyCredentialPassword(prisma, user.id, body.password));
       if (!user || !valid) {
         throw new HttpError({ statusCode: 401, message: 'Invalid email or password' });
       }
 
-      const token = await createSessionToken(prisma, user.id);
-      return { user: toAuthUser(user), token };
+      const token = await createSessionToken(prisma, user.id, 'admin');
+      return { user: toAuthUser(user, 'admin'), token };
     },
     {
       body: t.Object({
@@ -75,7 +76,7 @@ export const adminAuth = new Elysia({ prefix: '/auth', tags: ['Admin: Auth'] })
         },
         include: authUserInclude,
       });
-      return toAuthUser(user);
+      return toAuthUser(user, 'admin');
     },
     {
       body: t.Object({
@@ -87,8 +88,9 @@ export const adminAuth = new Elysia({ prefix: '/auth', tags: ['Admin: Auth'] })
     },
   )
 
-  // Dashboard accounts have no public email flow, so the current password
-  // is the proof here; other sessions are signed out.
+  // The dashboard has no email-code flow, so the current password is the
+  // proof here. This is the account's only password (shared with the reader
+  // API when it has both), and every other session is signed out.
   .put(
     '/password',
     async ({ prisma, authedUser, bearer, body }) => {

@@ -27,29 +27,38 @@ export const fakeRoles = {
     Object.values(roles).find((role) => role.slug === where.slug || role.id === where.id) ?? null,
 };
 
-/** Attaches the role relation that `authUserInclude` loads. */
-export function withRole<T extends { roleId?: string | null }>(row: T): T & { role: RoleFixture | null } {
-  return Object.assign(row, { role: row.roleId ? (roles[row.roleId] ?? null) : null });
+/** Attaches the role relations that `authUserInclude` loads. */
+export function withRole<T extends { userRoleId?: string | null; adminRoleId?: string | null }>(
+  row: T,
+): T & { userRole: RoleFixture | null; adminRole: RoleFixture | null } {
+  return Object.assign(row, {
+    userRole: row.userRoleId ? (roles[row.userRoleId] ?? null) : null,
+    adminRole: row.adminRoleId ? (roles[row.adminRoleId] ?? null) : null,
+  });
 }
 
-/** The `currentUser` that the real setup derives for a row. */
+/** The `currentUser` that the real setup derives for a reader-portal session. */
 export function sessionUser(row: {
   id: string;
   email: string;
   username: string;
   name: string;
-  portal?: 'admin' | 'user';
+  isUser?: boolean;
+  isAdmin?: boolean;
   isGuest?: boolean;
-  roleId?: string | null;
+  userRoleId?: string | null;
 }) {
-  const role = row.roleId ? roles[row.roleId] : undefined;
+  const isUser = row.isUser ?? true;
+  const role = isUser && row.userRoleId ? roles[row.userRoleId] : undefined;
   return {
     id: row.id,
     email: row.email,
     username: row.username,
     name: row.name,
-    portal: row.portal ?? 'user',
     isGuest: row.isGuest ?? false,
+    isUser,
+    isAdmin: row.isAdmin ?? false,
+    portal: 'user' as const,
     role: role ? { id: role.id, slug: role.slug, name: role.name } : null,
     permissions: role?.permissions.map((permission) => permission.key) ?? [],
   };
