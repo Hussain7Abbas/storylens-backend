@@ -37,7 +37,7 @@ help:
 	@echo "  $(GREEN)storage-seed$(RESET)         seed storage bucket"
 	@echo ""
 	@echo "$(BLUE)Deploy$(RESET)"
-	@echo "  $(GREEN)sync$(RESET)                 pm2-stop + git pull + db-generate + db-migrate-deploy + build + pm2-restart"
+	@echo "  $(GREEN)sync$(RESET)                 pm2-stop + git pull + install + db-generate + db-migrate-deploy + build + pm2-restart"
 	@echo "  $(GREEN)pm2-start$(RESET)            start API with PM2"
 	@echo "  $(GREEN)pm2-stop$(RESET)             stop PM2 API"
 	@echo "  $(GREEN)pm2-restart$(RESET)          restart PM2 API (starts it if missing)"
@@ -116,6 +116,7 @@ sync:
 	@$(MAKE) --no-print-directory pm2-stop || echo "$(YELLOW)API was not running$(RESET)"
 	@cd "$(ROOT)" && { \
 		git pull --ff-only && \
+		$(MAKE) --no-print-directory install && \
 		$(MAKE) --no-print-directory db-generate && \
 		$(MAKE) --no-print-directory db-migrate-deploy && \
 		$(MAKE) --no-print-directory build; \
