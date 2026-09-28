@@ -4,6 +4,7 @@ import {
   defaultRoleSlugs,
   permissionKey,
   PUBLIC_ENDPOINTS,
+  USER_ENDPOINT_DESCRIPTIONS,
 } from '@/lib/permissions';
 import { app } from '@/server';
 
@@ -29,6 +30,23 @@ describe('permission catalog', () => {
       .filter((key) => key.includes(' /api/'))
       .filter((key) => !PUBLIC_ENDPOINTS.has(key) && !byKey.has(key));
     expect(missing).toEqual([]);
+  });
+
+  it('describes every reader endpoint and every dashboard endpoint', () => {
+    const undescribed = permissions
+      .filter((permission) => permission.method)
+      .filter((permission) =>
+        permission.portal === 'user'
+          ? !USER_ENDPOINT_DESCRIPTIONS[permission.key]
+          : !routes.some(
+              (route) =>
+                permissionKey(route.method, route.path) === permission.key &&
+                typeof (route.hooks as { detail?: { summary?: unknown } }).detail?.summary === 'string',
+            ),
+      )
+      .map((permission) => permission.key);
+    expect(undescribed).toEqual([]);
+    expect(Object.keys(USER_ENDPOINT_DESCRIPTIONS).filter((key) => !routeKeys.has(key))).toEqual([]);
   });
 
   it('only lists public endpoints that exist', () => {

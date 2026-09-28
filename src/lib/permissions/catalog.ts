@@ -119,6 +119,75 @@ export function defaultRoleSlugs(permission: Pick<PermissionDefinition, 'key' | 
   return ROLES_BY_LEVEL[defaultAccessLevel(permission.key, permission.method ?? 'GET')];
 }
 
+/**
+ * Descriptions shown in the dashboard's role editor for reader endpoints.
+ * Dashboard endpoints use their route's `detail.summary` instead.
+ */
+export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
+  'GET /api/user/auth/me': 'View own profile',
+  'PUT /api/user/auth/me': 'Update own username and display name',
+  'POST /api/user/auth/logout': 'Sign out',
+  'GET /api/user/auth/check-username/:username': 'Check whether a username is free',
+  'POST /api/user/auth/change-password': 'Request a password change code',
+  'POST /api/user/auth/change-password/verify': 'Confirm a password change',
+  'POST /api/user/auth/change-email': 'Request an email change code',
+  'POST /api/user/auth/change-email/verify': 'Confirm an email change',
+  'POST /api/user/ai/chapter-selectors': 'Detect chapter selectors with AI',
+  'GET /api/user/novels/': 'List novels',
+  'GET /api/user/novels/:id': 'View a novel with its chapters',
+  'POST /api/user/novels/': 'Add a novel',
+  'PUT /api/user/novels/:id': 'Update a novel (readers: slugs and an empty context)',
+  'PUT /api/user/novels/:id/context': 'Set a novel’s AI context (readers: only while empty)',
+  'DELETE /api/user/novels/:id': 'Delete a novel',
+  'GET /api/user/chapters/novel/:novelId': 'List a novel’s chapters',
+  'GET /api/user/chapters/:id': 'View a chapter',
+  'POST /api/user/chapters/': 'Add a chapter',
+  'PUT /api/user/chapters/:id': 'Update a chapter',
+  'DELETE /api/user/chapters/:id': 'Delete a chapter',
+  'GET /api/user/keywords/': 'List keywords',
+  'GET /api/user/keywords/:id': 'View a keyword',
+  'POST /api/user/keywords/': 'Add a keyword',
+  'PUT /api/user/keywords/:id': 'Update a keyword (readers: own only)',
+  'DELETE /api/user/keywords/:id': 'Delete a keyword (readers: own only)',
+  'GET /api/user/keyword-aliases/': 'List keyword aliases',
+  'POST /api/user/keyword-aliases/': 'Add a keyword alias',
+  'PUT /api/user/keyword-aliases/:id': 'Update a keyword alias (readers: own keywords)',
+  'DELETE /api/user/keyword-aliases/:id': 'Delete a keyword alias (readers: own keywords)',
+  'GET /api/user/keyword-versions/': 'List keyword versions',
+  'POST /api/user/keyword-versions/': 'Add a keyword version',
+  'PUT /api/user/keyword-versions/:id': 'Update a keyword version (readers: own keywords)',
+  'DELETE /api/user/keyword-versions/:id': 'Delete a keyword version (readers: own keywords)',
+  'GET /api/user/keywords-chapters/:id': 'View a keyword–chapter link',
+  'GET /api/user/keywords-chapters/chapter/:chapterId': 'List keywords linked to a chapter',
+  'GET /api/user/keywords-chapters/keyword/:keywordId': 'List chapters linked to a keyword',
+  'POST /api/user/keywords-chapters/': 'Link a keyword to a chapter',
+  'DELETE /api/user/keywords-chapters/:id': 'Unlink a keyword from a chapter',
+  'GET /api/user/replacements/': 'List replacements',
+  'GET /api/user/replacements/:id': 'View a replacement',
+  'POST /api/user/replacements/': 'Add a replacement',
+  'PUT /api/user/replacements/:id': 'Update a replacement (readers: own only)',
+  'DELETE /api/user/replacements/:id': 'Delete a replacement (readers: own only)',
+  'GET /api/user/keyword-categories/': 'List keyword categories',
+  'GET /api/user/keyword-categories/:id': 'View a keyword category',
+  'POST /api/user/keyword-categories/': 'Add a keyword category',
+  'PUT /api/user/keyword-categories/:id': 'Update a keyword category',
+  'DELETE /api/user/keyword-categories/:id': 'Delete a keyword category',
+  'GET /api/user/keyword-natures/': 'List keyword natures',
+  'GET /api/user/keyword-natures/:id': 'View a keyword nature',
+  'POST /api/user/keyword-natures/': 'Add a keyword nature',
+  'PUT /api/user/keyword-natures/:id': 'Update a keyword nature',
+  'DELETE /api/user/keyword-natures/:id': 'Delete a keyword nature',
+  'GET /api/user/website-selectors/': 'List website selectors',
+  'GET /api/user/website-selectors/:website': 'Look up a website’s chapter selectors',
+  'POST /api/user/website-selectors/': 'Add website selectors',
+  'PUT /api/user/website-selectors/:website': 'Update website selectors',
+  'DELETE /api/user/website-selectors/:website': 'Delete website selectors',
+  'GET /api/user/website-novel-biases/': 'List website novel biases',
+  'POST /api/user/website-novel-biases/': 'Set a website novel bias',
+  'DELETE /api/user/website-novel-biases/:id': 'Delete a website novel bias',
+  'POST /api/user/files/upload': 'Upload an image or video',
+};
+
 const METHOD_VERBS: Record<string, string> = {
   GET: 'View',
   POST: 'Create',
@@ -131,8 +200,10 @@ function humanize(segment: string): string {
   return segment.replace(/^:/, 'by ').replace(/-/g, ' ');
 }
 
-function describe(method: string, rest: string[], summary: string | undefined): string {
+function describe(key: string, method: string, rest: string[], summary: string | undefined): string {
   if (summary) return summary;
+  const known = USER_ENDPOINT_DESCRIPTIONS[key];
+  if (known) return known;
 
   const verb = METHOD_VERBS[method] ?? method;
   const [group, ...tail] = rest;
@@ -179,7 +250,7 @@ export function collectPermissions(routes: RouteLike[]): PermissionDefinition[] 
       group: rest[0] ?? 'root',
       method,
       path: route.path,
-      description: describe(method, rest, routeSummary(route)),
+      description: describe(key, method, rest, routeSummary(route)),
     });
   }
 
