@@ -1,6 +1,6 @@
 # Backend instructions
 
-Follow [shared repository rules](../../AGENTS.md). This submodule provides the Elysia API used by the extension. See the [backend guide](../../docs/backend.md) for behavior and interfaces.
+Follow [shared repository rules](../../AGENTS.md). This submodule provides the Elysia API used by the extension, website account pages and desktop client (`/api/user`) and by the admin dashboard (`/api/admin`). See the [backend guide](../../docs/backend.md) for behavior and interfaces.
 
 ## Structure and conventions
 
@@ -13,27 +13,28 @@ Follow [shared repository rules](../../AGENTS.md). This submodule provides the E
 
 ## Permissions
 
-Enforce access in the API. `shouldBeGuest()` allows authenticated guests, users, and admins; `shouldBeUser()` allows users and admins; `shouldBeAdmin()` allows admins. Call `assertOwnsResource` for user-owned mutations. Never rely on an extension UI guard as authorization.
+Enforce access in the API; never rely on an extension or dashboard UI guard. See the [backend guide](../../docs/backend.md#portals-roles-and-permissions).
 
-- Authenticated roles can read novels, keywords, replacements, categories, natures, and chapters.
-- Users can create or change their own keywords and replacements, add novel names/slugs, fill a novel's `context` only while it is empty (`PUT /novels/:id`, `PUT /novels/:id/context`), and upload files; admins have full resource management access, including changing an existing context.
-- Novel deletion and management of categories, natures, chapters, configs, and website selectors are admin operations, subject to each route's current guard.
-- `POST /auth/login`, `POST /auth/register`, `POST /auth/register/verify`, `GET /auth/providers`, `POST /auth/oauth/session`, and the Better Auth `/auth/*` catch-all stay public, ahead of the `shouldBeGuest()` guard; the website's account pages call them without a session.
-- Better Auth handles OAuth only. Keep its credential, profile, and linking endpoints in `disabledPaths` and `username`/`role`/`password` as `input: false`; never let a Better Auth endpoint set a role.
-- Email/password registration creates or upgrades an account only after `POST /auth/register/verify` accepts the emailed code; never create an unverified user or return a session from `/auth/register`.
-- Password and email changes require a registered user or admin and an emailed code (`src/lib/auth/account-change.ts`). `POST /auth/change-password` checks the current password and emails the account address; `POST /auth/change-email` emails the new address. Apply a change only in the matching `/verify` route; update both credential stores atomically and never change a password or email without a verified code.
+- Every user has a `portal` (`admin` = dashboard, `user` = extension, website account pages and desktop client), an `isGuest` flag, and one `Role`. A role holds `Permission` rows; each permission key is a route's method and template (`GET /api/user/novels/:id`). `src/lib/permissions/sync.ts` creates rows for every non-public `/api/{portal}` route at startup, so a new route gets its permission automatically.
+- Mount reader routes in `src/routes/user.ts` (`/api/user`) and dashboard routes in `src/routes/admin/` (`/api/admin`). In each module, `.use(setup)`, then the module's public routes, then `.use(authorize('user' | 'admin'))`: it rejects signed-out callers (401), the other portal and missing route permissions (403). Nothing may live outside those prefixes except `/`, `/health`, `/docs` and the Better Auth `/auth/*` catch-all; `test/permissions.test.ts` enforces this.
+- Add a new public endpoint only to `PUBLIC_ENDPOINTS` in `src/lib/permissions/catalog.ts` (reader guest/register/verify/login/providers/OAuth exchange, dashboard login). Give each new reader route a `USER_ENDPOINT_DESCRIPTIONS` entry and each dashboard route a `detail.summary`; decide its default access in `defaultAccessLevel` (GET = guest, writes = reader, `MODERATOR_ENDPOINTS` = moderator; dashboard routes go to the super admin).
+- System roles (`super-admin`, `guest`, `reader`, `moderator`) are created by migration and referenced by slug (`SYSTEM_ROLES`); never delete them. Super admin always gets every admin permission. New guests get `guest`, verified registrations and Google sign-ups get `reader`.
+- Inside reader routes, use `canModerate(authedUser)` (the `user:moderate` capability) instead of role checks, and `assertOwnsResource` for reader-owned mutations. Readers fill a novel's `context` only while it is empty; moderators can replace it and set version chapter ranges.
+- Dashboard accounts are created only through `POST /api/admin/users` or `make seed-dashboard-admin` (from `DASHBOARD_ADMIN_*`); there is no admin registration. Keep the dashboard guards: no changing one's own portal or role, no self-deletion, never remove the last super admin, no deleting system roles or roles with users. Reader login and the OAuth exchange refuse dashboard accounts, and dashboard login refuses readers.
+- Better Auth handles OAuth only, at `/auth/*` (the Google redirect URI depends on it). Keep its credential, profile and linking endpoints in `disabledPaths` and `username`/`portal`/`isGuest`/`roleId`/`password` as `input: false`; never let a Better Auth endpoint set access.
+- Email/password registration creates or upgrades an account only after `POST /api/user/auth/register/verify` accepts the emailed code; never create an unverified user or return a session from `/register`.
+- Reader password and email changes require a registered account and an emailed code (`src/lib/auth/account-change.ts`); apply them only in the matching `/verify` route and update both credential stores atomically. Dashboard password changes (`PUT /api/admin/auth/password`) check the current password instead and sign out other sessions.
 - `/health` and `/health/ready` are public and unauthenticated; never return error details, secrets, or user data from them.
-- Guest accounts may update their own profile. Website selector lookup is available to authenticated roles; selector listing and writes require admin access.
-- If an action's permission is unclear, ask before changing its guard. Check the route itself for the precise current rule.
+- If an action's permission is unclear, ask before changing its default access.
 
 ## API and cross-submodule changes
 
-The development OpenAPI UI is at `/docs` and the spec at `/openapi.json`; the extension's Orval config consumes the spec. Update the generated client in the extension when an API change affects it. For persisted fields used by the extension, decide whether downloads, offline edits, and sync payloads need updates; ask the user if the intended offline behavior is unclear. See [extension instructions](../extension/AGENTS.md).
+The development OpenAPI UI is at `/docs` and the spec at `/openapi.json`; the extension's and dashboard's Orval configs consume the spec. Regenerate the extension client (`make orval`) after reader-API changes and the dashboard client (`make dashboard-orval`) after dashboard-API changes, and keep the dashboard's `src/lib/permissions.ts` in step with admin routes. For persisted fields used by the extension, decide whether downloads, offline edits, and sync payloads need updates; ask the user if the intended offline behavior is unclear. See [extension instructions](../extension/AGENTS.md).
 
 ## Commands
 
 From this directory, use `bun run dev`, `bun run typecheck`, and `bun run test`. Use `bun run db:generate`, `bun run db:migrate:dev`, and `bun run db:seed` for schema and seed work. `make help` lists Docker, migration, storage, and start targets. The `build` script currently generates the Prisma client, and `start` runs `src/main.ts`; do not assume a compiled production bundle.
 
-Production runs under PM2. Deploy only with `make sync` (`pm2-stop`, `git pull`, `install`, `db-generate`, `db-migrate-deploy`, `build`, `pm2-restart`) and use the `pm2-*` Make targets rather than raw `bun`/`pm2` commands on the server. `src/scripts/` holds one-off scripts run through Make targets, such as `make set-review-version VERSION=x.y.z`, which `.github/workflows/set-review-version.yml` runs over SSH when the extension repo dispatches `extension-submitted`. The `review-version-watcher` cron in `src/plugins/crons.ts` runs `make sync` once the `Review_Version` config matches the published Chrome Web Store version; logic lives in `src/lib/review-version.ts`.
+Production runs under PM2. Deploy only with `make sync` (`pm2-stop`, `git pull`, `install`, `db-generate`, `db-migrate-deploy`, `build`, `pm2-restart`) and use the `pm2-*` Make targets rather than raw `bun`/`pm2` commands on the server. `src/scripts/` holds one-off scripts run through Make targets, such as `make seed-dashboard-admin` (creates or resets the dashboard super admin) and `make set-review-version VERSION=x.y.z`, which `.github/workflows/set-review-version.yml` runs over SSH when the extension repo dispatches `extension-submitted`. The `review-version-watcher` cron in `src/plugins/crons.ts` runs `make sync` once the `Review_Version` config matches the published Chrome Web Store version; logic lives in `src/lib/review-version.ts`.
 
 Keep this file and the [backend guide](../../docs/backend.md) current when backend rules, structure, commands, or interfaces change, following the root maintenance rule.

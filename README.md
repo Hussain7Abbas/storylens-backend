@@ -49,11 +49,11 @@ cp .env.example .env
 | `PORT` | No | API port (default: `3000`) |
 | `NODE_ENV` | No | `development`, `test`, or `production` |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `ROOT_USERNAME` | For seed | Root admin username |
-| `ROOT_PASSWORD` | For seed | Root admin password |
+| `DASHBOARD_ADMIN_USERNAME` | For seed | Dashboard super admin username |
+| `DASHBOARD_ADMIN_PASSWORD` | For seed | Dashboard super admin password (8+ characters) |
 | `BETTER_AUTH_SECRET` | Yes | Better Auth signing secret |
 | `BETTER_AUTH_URL` | No | Public base URL for Better Auth |
-| `ROOT_EMAIL` | For seed | Root admin email |
+| `DASHBOARD_ADMIN_EMAIL` | For seed | Dashboard super admin email (not used by any reader account) |
 | `RESEND_API_KEY` | In production | Resend API key for registration codes (codes are logged when unset outside production) |
 | `EMAIL_FROM` | In production | Sender on a Resend-verified domain, e.g. `Story Lens <no-reply@example.com>` |
 | `STORAGE_IMGBB_API_KEY` | Yes | ImgBB API key for file uploads |
@@ -152,7 +152,7 @@ make db-migrate-deploy
 make db-reset
 ```
 
-Seed requires `ROOT_USERNAME` and `ROOT_PASSWORD` in `.env`. Development seed data includes sample novels, keywords, and categories.
+Seed requires `DASHBOARD_ADMIN_USERNAME`, `DASHBOARD_ADMIN_PASSWORD` and `DASHBOARD_ADMIN_EMAIL` in `.env`; it creates or resets the dashboard super admin (`make seed-dashboard-admin` does only that step). The API is split into `/api/user` (extension, website account pages, desktop client) and `/api/admin` (dashboard), with one permission per endpoint grouped into roles; see the umbrella [backend guide](https://github.com/Hussain7Abbas/storylens/blob/develop/docs/backend.md#portals-roles-and-permissions). Development seed data includes sample novels, keywords, and categories.
 
 ## Tests
 
