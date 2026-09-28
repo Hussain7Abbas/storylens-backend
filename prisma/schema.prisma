@@ -140,6 +140,8 @@ model Novel {
 
   name String @unique
   description String?
+  // Setting, premise, tone and main cast summary that AI prompts use as the novel's global context.
+  context String? @db.Text
   slugs String[] @default([])
 
   imageId String?
