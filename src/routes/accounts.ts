@@ -1,3 +1,4 @@
+import type { PrismaClient } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { auth, googleEnabled } from '@/lib/auth';
 import { mergeGuestInto } from '@/lib/auth/oauth';
@@ -8,11 +9,62 @@ import {
   toAuthUser,
   verifyCredentialPassword,
 } from '@/lib/auth/session';
+import {
+  consumeRegistration,
+  discardRegistration,
+  REGISTRATION_RESEND_COOLDOWN_MS,
+  registrationCodeEmail,
+  stageRegistration,
+} from '@/lib/auth/registration';
+import { sendEmail } from '@/lib/email';
 import { setup } from '@/setup';
 import { shouldBeGuest } from '@/middleware/authorize';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
 import bcrypt from 'bcryptjs';
+
+type Translate = (text: { en: string; ar: string }) => string;
+
+// Only a guest upgrades in place, so only its own row is not a conflict.
+function guestId(user: { id: string; role: string } | null): string | undefined {
+  return user?.role === 'guest' ? user.id : undefined;
+}
+
+// A guest registering may keep its own username; any other match is taken.
+async function assertRegistrationAvailable(
+  prisma: PrismaClient,
+  { email, username }: { email: string; username: string },
+  currentUserId: string | undefined,
+  translate: Translate,
+): Promise<void> {
+  const existingEmail = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+
+  if (existingEmail && existingEmail.id !== currentUserId) {
+    throw new HttpError({
+      message: translate({
+        en: 'Email already registered',
+        ar: 'البريد الإلكتروني مسجل بالفعل',
+      }),
+    });
+  }
+
+  const existingUsername = await prisma.user.findUnique({
+    where: { username },
+    select: { id: true },
+  });
+
+  if (existingUsername && existingUsername.id !== currentUserId) {
+    throw new HttpError({
+      message: translate({
+        en: 'Username already taken',
+        ar: 'اسم المستخدم مأخوذ بالفعل',
+      }),
+    });
+  }
+}
 
 export const accounts = new Elysia({
   prefix: '/auth',
@@ -65,103 +117,161 @@ export const accounts = new Elysia({
   )
 
   // Sign-in and registration must work without a session: signing out on the
-  // website clears it. Register still upgrades a guest when a token is sent.
-  // Register (upgrade guest to user with email+password)
+  // website clears it. Registration takes two steps: `/register` checks the
+  // details and emails a code, and `/register/verify` creates the account (or
+  // upgrades the guest whose token it receives) once the code matches.
   .post(
     '/register',
     async ({ currentUser, prisma, body, t: translate }) => {
       const email = sanitize(body.email).toLowerCase();
       const username = sanitize(body.username);
 
-      const existingEmail = await prisma.user.findUnique({
-        where: { email },
+      await assertRegistrationAvailable(prisma, { email, username }, guestId(currentUser), translate);
+
+      const staged = await stageRegistration(prisma, {
+        email,
+        username,
+        name: body.name ? sanitize(body.name) : username,
+        passwordHash: await bcrypt.hash(body.password, 12),
       });
 
-      if (existingEmail && existingEmail.id !== currentUser?.id) {
+      if (staged.status === 'cooldown') {
         throw new HttpError({
+          statusCode: 429,
           message: translate({
-            en: 'Email already registered',
-            ar: 'البريد الإلكتروني مسجل بالفعل',
+            en: `Please wait ${staged.retryAfterSeconds} seconds before requesting another code`,
+            ar: `يرجى الانتظار ${staged.retryAfterSeconds} ثانية قبل طلب رمز آخر`,
           }),
         });
       }
 
-      const existingUsername = await prisma.user.findUnique({
-        where: { username },
-      });
-
-      if (existingUsername && existingUsername.id !== currentUser?.id) {
+      const sent = await sendEmail(registrationCodeEmail(email, staged.code, translate));
+      if (!sent) {
+        // Drop the unusable code so the cooldown does not block a retry.
+        await discardRegistration(prisma, email);
         throw new HttpError({
+          statusCode: 502,
           message: translate({
-            en: 'Username already taken',
-            ar: 'اسم المستخدم مأخوذ بالفعل',
+            en: 'Could not send the verification email. Please try again later.',
+            ar: 'تعذر إرسال رسالة التحقق. يرجى المحاولة لاحقًا.',
           }),
         });
       }
-
-      const hashedPassword = await bcrypt.hash(body.password, 12);
-
-      if (currentUser?.role === 'guest') {
-        const user = await prisma.user.update({
-          where: { id: currentUser.id },
-          data: {
-            email,
-            username,
-            password: hashedPassword,
-            name: body.name ? sanitize(body.name) : username,
-            role: 'user',
-            emailVerified: false,
-          },
-        });
-
-        const account = await prisma.account.findFirst({
-          where: { userId: user.id, providerId: 'credential' },
-        });
-
-        if (account) {
-          await prisma.account.update({
-            where: { id: account.id },
-            data: {
-              accountId: email,
-              password: hashedPassword,
-            },
-          });
-        } else {
-          await createCredentialAccount(prisma, user.id, email, body.password);
-        }
-
-        const token = await createSessionToken(prisma, user.id);
-
-        return {
-          user: toAuthUser(user),
-          token,
-        };
-      }
-
-      const user = await prisma.user.create({
-        data: {
-          email,
-          username,
-          password: hashedPassword,
-          name: body.name ? sanitize(body.name) : username,
-          role: 'user',
-        },
-      });
-
-      await createCredentialAccount(prisma, user.id, email, body.password);
-      const token = await createSessionToken(prisma, user.id);
 
       return {
-        user: toAuthUser(user),
-        token,
+        email,
+        expiresAt: staged.expiresAt.toISOString(),
+        resendAfterSeconds: REGISTRATION_RESEND_COOLDOWN_MS / 1000,
       };
     },
     {
       body: t.Object({
         email: t.String({ format: 'email' }),
-        password: t.String({ minLength: 8 }),
+        password: t.String({ minLength: 8, maxLength: 72 }),
         username: t.String({ minLength: 3, maxLength: 30 }),
         name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+      }),
+    },
+  )
+
+  // Confirm the emailed code; returns a session like login.
+  .post(
+    '/register/verify',
+    async ({ currentUser, prisma, body, t: translate }) => {
+      const email = sanitize(body.email).toLowerCase();
+      const result = await consumeRegistration(prisma, email, body.code);
+
+      if (result.status === 'expired') {
+        throw new HttpError({
+          message: translate({
+            en: 'This code has expired. Request a new one.',
+            ar: 'انتهت صلاحية هذا الرمز. اطلب رمزًا جديدًا.',
+          }),
+        });
+      }
+
+      if (result.status === 'invalid') {
+        throw new HttpError({
+          message:
+            result.attemptsLeft > 0
+              ? translate({
+                  en: `Incorrect code. ${result.attemptsLeft} attempts left.`,
+                  ar: `رمز غير صحيح. المحاولات المتبقية: ${result.attemptsLeft}.`,
+                })
+              : translate({
+                  en: 'Too many incorrect attempts. Request a new code.',
+                  ar: 'محاولات خاطئة كثيرة. اطلب رمزًا جديدًا.',
+                }),
+        });
+      }
+
+      const { registration } = result;
+      // The email or username may have been taken while the code was pending.
+      await assertRegistrationAvailable(prisma, registration, guestId(currentUser), translate);
+
+      const data = {
+        email: registration.email,
+        username: registration.username,
+        password: registration.passwordHash,
+        name: registration.name,
+        role: 'user' as const,
+        emailVerified: true,
+      };
+
+      if (currentUser?.role === 'guest') {
+        const user = await prisma.$transaction(async (tx) => {
+          const upgraded = await tx.user.update({
+            where: { id: currentUser.id },
+            data,
+          });
+
+          const account = await tx.account.findFirst({
+            where: { userId: upgraded.id, providerId: 'credential' },
+          });
+
+          if (account) {
+            await tx.account.update({
+              where: { id: account.id },
+              data: { accountId: data.email, password: data.password },
+            });
+          } else {
+            await tx.account.create({
+              data: {
+                accountId: data.email,
+                providerId: 'credential',
+                userId: upgraded.id,
+                password: data.password,
+              },
+            });
+          }
+
+          return upgraded;
+        });
+
+        const token = await createSessionToken(prisma, user.id);
+        return { user: toAuthUser(user), token };
+      }
+
+      const user = await prisma.user.create({
+        data: {
+          ...data,
+          accounts: {
+            create: {
+              accountId: data.email,
+              providerId: 'credential',
+              password: data.password,
+            },
+          },
+        },
+      });
+
+      const token = await createSessionToken(prisma, user.id);
+      return { user: toAuthUser(user), token };
+    },
+    {
+      body: t.Object({
+        email: t.String({ format: 'email' }),
+        code: t.String({ pattern: '^[0-9]{6}$' }),
       }),
     },
   )

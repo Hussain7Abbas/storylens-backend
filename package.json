@@ -1,7 +1,7 @@
 {
   "name": "storylens-backend",
   "private": true,
-  "version": "3.0.0",
+  "version": "3.1.0",
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
@@ -38,6 +38,7 @@
     "jsdom": "^29.1.1",
     "linkedom": "^0.18.12",
     "prismabox": "^1.1.25",
+    "resend": "^6.30.0",
     "sharp": "^0.34.4",
     "xpath": "^0.0.34",
     "zod": "^4.1.12"
