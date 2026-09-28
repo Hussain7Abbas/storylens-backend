@@ -143,7 +143,7 @@ export const novels = new Elysia({
     },
   )
 
-  // Create novel (user: name + slugs only; admin: full)
+  // Create novel (user: name, slugs and context only; admin: full)
   .use(shouldBeUser())
   .post(
     '/',
@@ -155,6 +155,7 @@ export const novels = new Elysia({
           data: {
             name: sanitizedBody.name,
             description: sanitizedBody.description,
+            context: sanitizedBody.context,
             imageId: sanitizedBody.imageId,
             slugs: sanitizedBody.slugs ?? [],
             createdById: authedUser.id,
@@ -169,11 +170,13 @@ export const novels = new Elysia({
 
       const name = sanitize(body.name);
       const slugs = body.slugs?.map((slug) => sanitize(slug)) ?? [];
+      const context = body.context ? sanitize(body.context) : undefined;
 
       const novel = await prisma.novel.create({
         data: {
           name,
           slugs,
+          context,
           createdById: authedUser.id,
         },
         include: {
@@ -187,6 +190,7 @@ export const novels = new Elysia({
       body: t.Object({
         name: t.String({ minLength: 1 }),
         description: t.Optional(t.String({ minLength: 1 })),
+        context: t.Optional(t.String({ minLength: 1, maxLength: 20000 })),
         imageId: t.Optional(t.String({ format: 'uuid' })),
         slugs: t.Optional(t.Array(t.String({ minLength: 1 }))),
       }),
@@ -201,7 +205,7 @@ export const novels = new Elysia({
     },
   )
 
-  // Update novel (user: slugs only; admin: full)
+  // Update novel (user: slugs, plus context while it is empty; admin: full)
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -221,10 +225,15 @@ export const novels = new Elysia({
 
       if (!isAdmin(authedUser)) {
         const slugs = body.slugs?.map((slug) => sanitize(slug)) ?? existingNovel.slugs;
+        // Users may fill a missing context; only admins can change an existing one.
+        const context =
+          body.context && !existingNovel.context?.trim()
+            ? sanitize(body.context)
+            : undefined;
 
         const novel = await prisma.novel.update({
           where: { id },
-          data: { slugs },
+          data: { slugs, context },
           include: { image: true },
         });
 
@@ -238,6 +247,7 @@ export const novels = new Elysia({
         data: {
           name: sanitizedBody.name,
           description: sanitizedBody.description,
+          context: sanitizedBody.context,
           imageId: sanitizedBody.imageId,
           slugs: sanitizedBody.slugs,
         },
@@ -255,8 +265,63 @@ export const novels = new Elysia({
       body: t.Object({
         name: t.String({ minLength: 1 }),
         description: t.Optional(t.String({ minLength: 1 })),
+        context: t.Optional(t.String({ minLength: 1, maxLength: 20000 })),
         imageId: t.Optional(t.String({ format: 'uuid' })),
         slugs: t.Optional(t.Array(t.String({ minLength: 1 }))),
+      }),
+      response: {
+        200: t.Composite([
+          NovelPlain,
+          t.Object({
+            image: t.Nullable(FilePlain),
+          }),
+        ]),
+      },
+    },
+  )
+
+  // Set novel context (user: only while it is empty, e.g. AI auto-fill; admin: always)
+  .put(
+    '/:id/context',
+    async ({ t, prisma, params: { id }, body, authedUser }) => {
+      const existingNovel = await prisma.novel.findUnique({
+        where: { id },
+      });
+
+      if (!existingNovel) {
+        throw new HttpError({
+          statusCode: 404,
+          message: t({
+            en: 'Novel not found',
+            ar: 'الرواية غير موجودة',
+          }),
+        });
+      }
+
+      if (!isAdmin(authedUser) && existingNovel.context?.trim()) {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'Only admins can change an existing novel context',
+            ar: 'يمكن للمشرفين فقط تعديل سياق الرواية الموجود',
+          }),
+        });
+      }
+
+      const novel = await prisma.novel.update({
+        where: { id },
+        data: { context: sanitize(body.context) },
+        include: { image: true },
+      });
+
+      return novel;
+    },
+    {
+      params: t.Object({
+        id: t.String({ format: 'uuid' }),
+      }),
+      body: t.Object({
+        context: t.String({ minLength: 1, maxLength: 20000 }),
       }),
       response: {
         200: t.Composite([

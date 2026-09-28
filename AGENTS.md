@@ -16,7 +16,7 @@ Follow [shared repository rules](../../AGENTS.md). This submodule provides the E
 Enforce access in the API. `shouldBeGuest()` allows authenticated guests, users, and admins; `shouldBeUser()` allows users and admins; `shouldBeAdmin()` allows admins. Call `assertOwnsResource` for user-owned mutations. Never rely on an extension UI guard as authorization.
 
 - Authenticated roles can read novels, keywords, replacements, categories, natures, and chapters.
-- Users can create or change their own keywords and replacements, add novel names/slugs, and upload files; admins have full resource management access.
+- Users can create or change their own keywords and replacements, add novel names/slugs, fill a novel's `context` only while it is empty (`PUT /novels/:id`, `PUT /novels/:id/context`), and upload files; admins have full resource management access, including changing an existing context.
 - Novel deletion and management of categories, natures, chapters, configs, and website selectors are admin operations, subject to each route's current guard.
 - `POST /auth/login`, `POST /auth/register`, `POST /auth/register/verify`, `GET /auth/providers`, `POST /auth/oauth/session`, and the Better Auth `/auth/*` catch-all stay public, ahead of the `shouldBeGuest()` guard; the website's account pages call them without a session.
 - Better Auth handles OAuth only. Keep its credential, profile, and linking endpoints in `disabledPaths` and `username`/`role`/`password` as `input: false`; never let a Better Auth endpoint set a role.
