@@ -16,6 +16,17 @@ import {
   registrationCodeEmail,
   stageRegistration,
 } from '@/lib/auth/registration';
+import {
+  ACCOUNT_CHANGE_RESEND_COOLDOWN_MS,
+  type AccountChange,
+  type AccountChangeKind,
+  accountChangeCodeEmail,
+  type ConsumeChangeResult,
+  consumeAccountChange,
+  discardAccountChange,
+  emailChangedNotice,
+  stageAccountChange,
+} from '@/lib/auth/account-change';
 import { sendEmail } from '@/lib/email';
 import { setup } from '@/setup';
 import { shouldBeGuest } from '@/middleware/authorize';
@@ -64,6 +75,111 @@ async function assertRegistrationAvailable(
       }),
     });
   }
+}
+
+type Member = { id: string; email: string; role: string };
+
+// Guests have no verified email, so only users and admins change credentials.
+function requireMember<T extends Member>(currentUser: T | null | undefined): T {
+  if (!currentUser) {
+    throw new HttpError({ statusCode: 401, message: 'Authentication required' });
+  }
+  if (currentUser.role === 'guest') {
+    throw new HttpError({ statusCode: 403, message: 'User role required' });
+  }
+  return currentUser;
+}
+
+async function assertEmailAvailable(
+  prisma: PrismaClient,
+  email: string,
+  currentUserId: string,
+  translate: Translate,
+): Promise<void> {
+  const existing = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+
+  if (existing && existing.id !== currentUserId) {
+    throw new HttpError({
+      message: translate({
+        en: 'Email already registered',
+        ar: 'البريد الإلكتروني مسجل بالفعل',
+      }),
+    });
+  }
+}
+
+// Stages the change and emails its code to `to`.
+async function sendAccountChangeCode(
+  prisma: PrismaClient,
+  member: Member,
+  to: string,
+  change: AccountChange,
+  translate: Translate,
+) {
+  const staged = await stageAccountChange(prisma, member.id, change);
+
+  if (staged.status === 'cooldown') {
+    throw new HttpError({
+      statusCode: 429,
+      message: translate({
+        en: `Please wait ${staged.retryAfterSeconds} seconds before requesting another code`,
+        ar: `يرجى الانتظار ${staged.retryAfterSeconds} ثانية قبل طلب رمز آخر`,
+      }),
+    });
+  }
+
+  const sent = await sendEmail(accountChangeCodeEmail(to, staged.code, change.kind, translate));
+  if (!sent) {
+    // Drop the unusable code so the cooldown does not block a retry.
+    await discardAccountChange(prisma, member.id, change.kind);
+    throw new HttpError({
+      statusCode: 502,
+      message: translate({
+        en: 'Could not send the verification email. Please try again later.',
+        ar: 'تعذر إرسال رسالة التحقق. يرجى المحاولة لاحقًا.',
+      }),
+    });
+  }
+
+  return {
+    email: to,
+    expiresAt: staged.expiresAt.toISOString(),
+    resendAfterSeconds: ACCOUNT_CHANGE_RESEND_COOLDOWN_MS / 1000,
+  };
+}
+
+function verifiedChange<K extends AccountChangeKind>(
+  result: ConsumeChangeResult<K>,
+  translate: Translate,
+): Extract<AccountChange, { kind: K }> {
+  if (result.status === 'expired') {
+    throw new HttpError({
+      message: translate({
+        en: 'This code has expired. Request a new one.',
+        ar: 'انتهت صلاحية هذا الرمز. اطلب رمزًا جديدًا.',
+      }),
+    });
+  }
+
+  if (result.status === 'invalid') {
+    throw new HttpError({
+      message:
+        result.attemptsLeft > 0
+          ? translate({
+              en: `Incorrect code. ${result.attemptsLeft} attempts left.`,
+              ar: `رمز غير صحيح. المحاولات المتبقية: ${result.attemptsLeft}.`,
+            })
+          : translate({
+              en: 'Too many incorrect attempts. Request a new code.',
+              ar: 'محاولات خاطئة كثيرة. اطلب رمزًا جديدًا.',
+            }),
+    });
+  }
+
+  return result.change;
 }
 
 export const accounts = new Elysia({
@@ -479,17 +595,14 @@ export const accounts = new Elysia({
     },
   )
 
-  // Change both credential stores atomically; retain the current session.
+  // Password changes take two steps: `/change-password` checks the current
+  // password and emails a code to the account address, and
+  // `/change-password/verify` applies the new password once the code matches.
   .post(
     '/change-password',
     async ({ currentUser, prisma, body, t: translate }) => {
-      if (!currentUser) {
-        throw new HttpError({ statusCode: 401, message: 'Authentication required' });
-      }
-      if (currentUser.role === 'guest') {
-        throw new HttpError({ statusCode: 403, message: 'User role required' });
-      }
-      const valid = await verifyCredentialPassword(prisma, currentUser.id, body.currentPassword);
+      const member = requireMember(currentUser);
+      const valid = await verifyCredentialPassword(prisma, member.id, body.currentPassword);
       if (!valid) {
         throw new HttpError({
           statusCode: 400,
@@ -499,17 +612,94 @@ export const accounts = new Elysia({
           }),
         });
       }
-      const password = await bcrypt.hash(body.newPassword, 12);
-      await prisma.$transaction([
-        prisma.user.update({ where: { id: currentUser.id }, data: { password } }),
-        prisma.account.updateMany({ where: { userId: currentUser.id, providerId: 'credential' }, data: { password } }),
-      ]);
-      return { success: true };
+
+      const passwordHash = await bcrypt.hash(body.newPassword, 12);
+      return sendAccountChangeCode(prisma, member, member.email, { kind: 'password', passwordHash }, translate);
     },
     {
       body: t.Object({
         currentPassword: t.String({ minLength: 1 }),
         newPassword: t.String({ minLength: 8, maxLength: 72 }),
+      }),
+    },
+  )
+
+  // Change both credential stores atomically; retain the current session.
+  .post(
+    '/change-password/verify',
+    async ({ currentUser, prisma, body, t: translate }) => {
+      const member = requireMember(currentUser);
+      const result = await consumeAccountChange(prisma, member.id, 'password', body.code);
+      const { passwordHash: password } = verifiedChange(result, translate);
+
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: member.id }, data: { password } }),
+        prisma.account.updateMany({ where: { userId: member.id, providerId: 'credential' }, data: { password } }),
+      ]);
+      return { success: true };
+    },
+    {
+      body: t.Object({
+        code: t.String({ pattern: '^[0-9]{6}$' }),
+      }),
+    },
+  )
+
+  // Email changes send the code to the new address, proving it belongs to the
+  // reader; `/change-email/verify` then moves the account to it.
+  .post(
+    '/change-email',
+    async ({ currentUser, prisma, body, t: translate }) => {
+      const member = requireMember(currentUser);
+      const email = sanitize(body.email).toLowerCase();
+
+      if (email === member.email) {
+        throw new HttpError({
+          message: translate({
+            en: 'This is already your email address',
+            ar: 'هذا هو بريدك الإلكتروني الحالي بالفعل',
+          }),
+        });
+      }
+      await assertEmailAvailable(prisma, email, member.id, translate);
+
+      return sendAccountChangeCode(prisma, member, email, { kind: 'email', email }, translate);
+    },
+    {
+      body: t.Object({
+        email: t.String({ format: 'email' }),
+      }),
+    },
+  )
+
+  .post(
+    '/change-email/verify',
+    async ({ currentUser, prisma, body, t: translate }) => {
+      const member = requireMember(currentUser);
+      const result = await consumeAccountChange(prisma, member.id, 'email', body.code);
+      const { email } = verifiedChange(result, translate);
+      // The address may have been registered while the code was pending.
+      await assertEmailAvailable(prisma, email, member.id, translate);
+
+      const [user] = await prisma.$transaction([
+        prisma.user.update({
+          where: { id: member.id },
+          data: { email, emailVerified: true },
+        }),
+        prisma.account.updateMany({
+          where: { userId: member.id, providerId: 'credential' },
+          data: { accountId: email },
+        }),
+      ]);
+
+      // Best effort: the change already succeeded.
+      await sendEmail(emailChangedNotice(member.email, email, translate));
+
+      return toAuthUser(user);
+    },
+    {
+      body: t.Object({
+        code: t.String({ pattern: '^[0-9]{6}$' }),
       }),
     },
   )

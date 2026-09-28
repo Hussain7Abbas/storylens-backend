@@ -16,12 +16,12 @@ Follow [shared repository rules](../../AGENTS.md). This submodule provides the E
 Enforce access in the API. `shouldBeGuest()` allows authenticated guests, users, and admins; `shouldBeUser()` allows users and admins; `shouldBeAdmin()` allows admins. Call `assertOwnsResource` for user-owned mutations. Never rely on an extension UI guard as authorization.
 
 - Authenticated roles can read novels, keywords, replacements, categories, natures, and chapters.
-- Users can create or change their own keywords, add novel names/slugs, and upload files; admins have full resource management access.
-- Replacement writes, novel deletion, and management of categories, natures, chapters, configs, and website selectors are admin operations, subject to each route's current guard.
+- Users can create or change their own keywords and replacements, add novel names/slugs, and upload files; admins have full resource management access.
+- Novel deletion and management of categories, natures, chapters, configs, and website selectors are admin operations, subject to each route's current guard.
 - `POST /auth/login`, `POST /auth/register`, `POST /auth/register/verify`, `GET /auth/providers`, `POST /auth/oauth/session`, and the Better Auth `/auth/*` catch-all stay public, ahead of the `shouldBeGuest()` guard; the website's account pages call them without a session.
 - Better Auth handles OAuth only. Keep its credential, profile, and linking endpoints in `disabledPaths` and `username`/`role`/`password` as `input: false`; never let a Better Auth endpoint set a role.
 - Email/password registration creates or upgrades an account only after `POST /auth/register/verify` accepts the emailed code; never create an unverified user or return a session from `/auth/register`.
-- Password changes require a registered user or admin and the current password; update both credential stores atomically.
+- Password and email changes require a registered user or admin and an emailed code (`src/lib/auth/account-change.ts`). `POST /auth/change-password` checks the current password and emails the account address; `POST /auth/change-email` emails the new address. Apply a change only in the matching `/verify` route; update both credential stores atomically and never change a password or email without a verified code.
 - `/health` and `/health/ready` are public and unauthenticated; never return error details, secrets, or user data from them.
 - Guest accounts may update their own profile. Website selector lookup is available to authenticated roles; selector listing and writes require admin access.
 - If an action's permission is unclear, ask before changing its guard. Check the route itself for the precise current rule.
