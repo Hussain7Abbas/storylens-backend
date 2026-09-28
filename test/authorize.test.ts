@@ -13,4 +13,5 @@ it('checks portal and route permissions', async () => {
     child.exited,
   ]);
   expect({ code, output: code === 0 ? '' : stdout + stderr }).toEqual({ code: 0, output: '' });
-});
+  // The child runs a whole `bun test` process (bcrypt hashing included).
+}, 30_000);

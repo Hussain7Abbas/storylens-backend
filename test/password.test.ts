@@ -13,4 +13,5 @@ it('verifies password and email changes with emailed codes and role guards', asy
     child.exited,
   ]);
   expect({ code, output: code === 0 ? '' : stdout + stderr }).toEqual({ code: 0, output: '' });
-});
+  // The child runs a whole `bun test` process (bcrypt hashing included).
+}, 30_000);
