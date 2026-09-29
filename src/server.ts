@@ -1,5 +1,5 @@
 import { Elysia, status } from "elysia";
-import { cors, crons, logError, logger, openapi, queryParser } from "./plugins";
+import { clientVersion, cors, crons, logError, logger, openapi, queryParser } from "./plugins";
 import { adminApi } from "./routes/admin";
 import { betterAuthRoutes } from "./routes/better-auth";
 import { health } from "./routes/health";
@@ -10,6 +10,7 @@ import { AuthError, HttpError } from "./utils/errors";
 export const app = new Elysia()
 	.use(logger)
 	.use(cors)
+	.use(clientVersion)
 	.use(openapi)
 	.use(crons)
 	.use(queryParser)

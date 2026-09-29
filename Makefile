@@ -1,4 +1,4 @@
-.PHONY: help install dev build start typecheck test \
+.PHONY: help install dev build start typecheck test deprecations \
 	docker-up docker-down docker-logs \
 	db-generate db-migrate-dev db-migrate-deploy db-reset db-seed db-studio storage-seed setup \
 	pm2-start pm2-stop pm2-restart pm2-delete sync set-review-version seed-dashboard-admin
@@ -26,6 +26,7 @@ help:
 	@echo "  $(GREEN)start$(RESET)                run production build"
 	@echo "  $(GREEN)typecheck$(RESET)            TypeScript check"
 	@echo "  $(GREEN)test$(RESET)                 run tests"
+	@echo "  $(GREEN)deprecations$(RESET)         list deprecations; fail on expired or undated ones"
 	@echo "  $(GREEN)docker-up$(RESET)            start Postgres"
 	@echo "  $(GREEN)docker-down$(RESET)          stop Postgres"
 	@echo "  $(GREEN)db-generate$(RESET)          prisma generate"
@@ -65,6 +66,9 @@ typecheck:
 
 test:
 	@cd "$(ROOT)" && bun run test
+
+deprecations:
+	@cd "$(ROOT)" && bun run deprecations
 
 docker-up:
 	@cd "$(ROOT)" && docker compose up -d

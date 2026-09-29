@@ -2,6 +2,7 @@ import { bearer } from '@elysiajs/bearer';
 import { prisma } from '@/lib/db';
 import { getSessionFromBearerToken, toAuthUser } from '@/lib/auth/session';
 import { Elysia } from 'elysia';
+import { deprecation } from '@/plugins/deprecation';
 import { toLanguage } from '@/utils/translation';
 
 export const setup = new Elysia({ name: 'setup' })
@@ -11,6 +12,8 @@ export const setup = new Elysia({ name: 'setup' })
 
   // Plugins
   .use(bearer())
+  // Adds the `deprecated` route option
+  .use(deprecation)
 
   // Translation
   .derive({ as: 'scoped' }, ({ headers }) => {
