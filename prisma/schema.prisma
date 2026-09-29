@@ -20,10 +20,11 @@ enum FileType {
   Video
 }
 
-enum Role {
-  guest
-  user
+// The two APIs: `admin` is the dashboard (`/api/admin`), `user` is the
+// extension, website account pages and desktop client (`/api/user`).
+enum Portal {
   admin
+  user
 }
 
 enum MatchingType {
@@ -45,8 +46,16 @@ model User {
   // Provider profile picture URL; Better Auth writes it on OAuth sign-up.
   image String?
 
-  // Authorization
-  role Role @default(guest)
+  // Authorization: one account may use both APIs. Each flag enables a portal
+  // and that portal's role grants the permissions there.
+  isUser      Boolean @default(true)
+  userRoleId  String?
+  userRole    Role?   @relation("UserRole", fields: [userRoleId], references: [id], onDelete: SetNull)
+  isAdmin     Boolean @default(false)
+  adminRoleId String?
+  adminRole   Role?   @relation("AdminRole", fields: [adminRoleId], references: [id], onDelete: SetNull)
+  // Anonymous extension install; verified registration or OAuth clears it.
+  isGuest     Boolean @default(false)
 
   avatarId String?
   avatar   File?   @relation(fields: [avatarId], references: [id], name: "UserAvatars")
@@ -66,6 +75,54 @@ model User {
   accounts        Account[]
 }
 
+// A named set of permissions for one portal. System roles (fixed slugs) are
+// created by migrations and cannot be deleted; `super-admin` always holds
+// every admin permission.
+model Role {
+  id String @id @default(uuid())
+
+  slug        String  @unique
+  name        String
+  description String?
+  portal      Portal
+  isSystem    Boolean @default(false)
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  permissions Permission[] @relation("RolePermissions")
+  // A role is used through the relation matching its portal.
+  readers     User[]       @relation("UserRole")
+  admins      User[]       @relation("AdminRole")
+
+  @@index([portal])
+}
+
+// One row per API endpoint (`METHOD /route/:template`) plus capability keys
+// such as `user:moderate`. The server syncs endpoint rows from its routes on
+// startup.
+model Permission {
+  id String @id @default(uuid())
+
+  key         String  @unique
+  portal      Portal
+  group       String
+  method      String?
+  path        String?
+  description String?
+
+  // Metadata
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  roles Role[] @relation("RolePermissions")
+
+  @@index([portal])
+}
+
 model Session {
   id        String   @id @default(uuid())
   expiresAt DateTime
@@ -76,6 +133,8 @@ model Session {
   userAgent String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // The API this token was issued for; it is rejected by the other one.
+  portal    Portal   @default(user)
 
   @@index([userId])
   @@map("session")
@@ -138,8 +197,13 @@ model File {
 model Novel {
   id String @id @default(uuid())
 
-  name String @unique
-  description String?
+  // Translated fields: each language has its own column; readers only see their language's.
+  nameAr        String? @unique
+  nameEn        String? @unique
+  descriptionAr String?
+  descriptionEn String?
+  // Setting, premise, tone and main cast summary that AI prompts use as the novel's global context.
+  context String? @db.Text
   slugs String[] @default([])
 
   imageId String?
@@ -217,7 +281,9 @@ model KeywordNature {
 
 model Keyword {
   id           String       @id @default(uuid())
-  name         String
+  // Translated names matched on pages in that language; at least one is set.
+  nameAr       String?
+  nameEn       String?
   matchingType MatchingType @default(FULL)
 
   novelId String
@@ -236,8 +302,10 @@ model Keyword {
   KeywordsChapters KeywordsChapters[] @relation("KeywordsChapters")
   replacements     Replacement[]      @relation("KeywordReplacements")
 
-  @@unique([name, novelId])
-  @@index([name])
+  @@unique([nameAr, novelId])
+  @@unique([nameEn, novelId])
+  @@index([nameAr])
+  @@index([nameEn])
 }
 
 model KeywordAlias {

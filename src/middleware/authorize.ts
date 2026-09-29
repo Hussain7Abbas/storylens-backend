@@ -1,5 +1,7 @@
-import type { AuthUserPayload } from '@/lib/auth/session';
+import type { Portal } from '@prisma/client';
 import { Elysia } from 'elysia';
+import type { AuthUserPayload } from '@/lib/auth/session';
+import { CAPABILITIES, permissionKey } from '@/lib/permissions';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 
@@ -13,91 +15,62 @@ function forbidden(message = 'Insufficient permissions'): never {
   throw new HttpError({ statusCode: 403, message });
 }
 
-/** Any authenticated role: guest, user, or admin (read access). */
-export function shouldBeGuest() {
-  return new Elysia({ name: 'middleware/shouldBeGuest' })
+const PORTAL_MISMATCH: Record<Portal, string> = {
+  admin: 'Sign in to the dashboard with an account that has dashboard access',
+  user: 'Sign in with an account that has reader access',
+};
+
+/**
+ * Requires a session issued for `portal`, an account with access to it, and
+ * that portal's role holding the permission of the matched route (`METHOD /api/{portal}/...`). Use it once per
+ * route module, after `.use(setup)` and that module's public routes. It
+ * derives (rather than resolves) so signed-out callers get 401 before input
+ * validation runs.
+ */
+export function authorize(portal: Portal) {
+  return new Elysia({ name: `middleware/authorize:${portal}` })
     .use(setup)
-    .derive({ as: 'scoped' }, ({ currentUser }) => {
+    .derive({ as: 'scoped' }, ({ currentUser, request, route }) => {
       if (!currentUser) {
         unauthorized();
+      }
+
+      // The session must be issued for this API and the account allowed on it.
+      const allowed = portal === 'admin' ? currentUser.isAdmin : currentUser.isUser;
+      if (currentUser.portal !== portal || !allowed) {
+        forbidden(PORTAL_MISMATCH[portal]);
+      }
+
+      const key = permissionKey(request.method, route);
+      if (!currentUser.permissions.includes(key)) {
+        forbidden(`Missing permission: ${key}`);
       }
 
       return { authedUser: currentUser as AuthedUser };
     });
 }
 
-/** User or admin (mutations available to registered users). */
-export function shouldBeUser() {
-  return new Elysia({ name: 'middleware/shouldBeUser' })
-    .use(setup)
-    .derive({ as: 'scoped' }, ({ currentUser }) => {
-      if (!currentUser) {
-        unauthorized();
-      }
-
-      if (currentUser.role === 'guest') {
-        forbidden('User role required');
-      }
-
-      return { authedUser: currentUser as AuthedUser };
-    });
+export function hasPermission(authedUser: AuthedUser, key: string): boolean {
+  return authedUser.permissions.includes(key);
 }
 
-/** Admin only (full access). */
-export function shouldBeAdmin() {
-  return new Elysia({ name: 'middleware/shouldBeAdmin' })
-    .use(setup)
-    .derive({ as: 'scoped' }, ({ currentUser }) => {
-      if (!currentUser) {
-        unauthorized();
-      }
-
-      if (currentUser.role !== 'admin') {
-        forbidden('Admin role required');
-      }
-
-      return { authedUser: currentUser as AuthedUser };
-    });
+/** Moderators may change shared data and other readers' content. */
+export function canModerate(authedUser: AuthedUser): boolean {
+  return hasPermission(authedUser, CAPABILITIES.moderate);
 }
 
-/** User may only mutate their own resource; admin may mutate any. */
+/** Readers may only mutate what they created; moderators may mutate anything. */
 export function assertOwnsResource(
   createdById: string | null | undefined,
   authedUser: AuthedUser,
 ): void {
-  if (authedUser.role === 'admin') {
+  if (canModerate(authedUser)) {
     return;
   }
 
-  if (authedUser.role === 'user' && createdById === authedUser.id) {
+  if (createdById && createdById === authedUser.id) {
     return;
   }
 
   forbidden('You can only modify resources you created');
-}
-
-export function isAdmin(authedUser: AuthedUser): boolean {
-  return authedUser.role === 'admin';
-}
-
-/** @deprecated Use shouldBeUser() or shouldBeAdmin() instead. */
-export function requireAuth() {
-  return shouldBeGuest();
-}
-
-/** @deprecated Use shouldBeAdmin() or shouldBeUser() instead. */
-export function requireRole(...roles: Array<'guest' | 'user' | 'admin'>) {
-  return new Elysia({ name: `middleware/requireRole:${roles.join(',')}` })
-    .use(setup)
-    .derive({ as: 'scoped' }, ({ currentUser }) => {
-      if (!currentUser) {
-        unauthorized();
-      }
-
-      if (!roles.includes(currentUser.role)) {
-        forbidden();
-      }
-
-      return { authedUser: currentUser as AuthedUser };
-    });
 }

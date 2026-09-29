@@ -1,27 +1,16 @@
 import { Elysia, status } from "elysia";
-import { cors, crons, logError, logger, openapi, queryParser } from "./plugins";
-import { accounts } from "./routes/accounts";
-import { ai } from "./routes/ai";
-import { chapters } from "./routes/chapters";
-import { configs } from "./routes/configs";
-import { files } from "./routes/files";
+import { clientVersion, cors, crons, logError, logger, openapi, queryParser } from "./plugins";
+import { adminApi } from "./routes/admin";
+import { betterAuthRoutes } from "./routes/better-auth";
 import { health } from "./routes/health";
-import { keywordCategories } from "./routes/keyword-categories";
-import { keywordNatures } from "./routes/keyword-natures";
-import { keywordAliases } from "./routes/keyword-aliases";
-import { keywordVersions } from "./routes/keyword-versions";
-import { keywords } from "./routes/keywords";
-import { keywordsChapters } from "./routes/keywords-chapters";
-import { novels } from "./routes/novels";
-import { replacements } from "./routes/replacements";
-import { websiteNovelBiases } from "./routes/website-novel-biases";
-import { websiteSelectors } from "./routes/website-selectors";
+import { userApi } from "./routes/user";
 import { errorSchema } from "./schemas/common";
 import { AuthError, HttpError } from "./utils/errors";
 
 export const app = new Elysia()
 	.use(logger)
 	.use(cors)
+	.use(clientVersion)
 	.use(openapi)
 	.use(crons)
 	.use(queryParser)
@@ -78,18 +67,6 @@ export const app = new Elysia()
 	}))
 
 	.use(health)
-	.use(accounts)
-	.use(configs)
-	.use(websiteSelectors)
-	.use(websiteNovelBiases)
-	.use(novels)
-	.use(chapters)
-	.use(keywords)
-	.use(keywordAliases)
-	.use(keywordVersions)
-	.use(replacements)
-	.use(keywordsChapters)
-	.use(keywordCategories)
-	.use(keywordNatures)
-	.use(files)
-	.use(ai);
+	.use(betterAuthRoutes)
+	.use(userApi)
+	.use(adminApi);

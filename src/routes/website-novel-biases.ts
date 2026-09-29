@@ -1,6 +1,6 @@
 import { WebsiteNovelBiasPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
-import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
+import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 
@@ -9,7 +9,7 @@ export const websiteNovelBiases = new Elysia({
   tags: ['WebsiteNovelBiases'],
 })
   .use(setup)
-  .use(shouldBeGuest())
+  .use(authorize('user'))
 
   // Get all biases for a novel
   .get(
@@ -52,8 +52,7 @@ export const websiteNovelBiases = new Elysia({
     },
   )
 
-  // Upsert bias (admin only); biasValue === 0 deletes the row
-  .use(shouldBeAdmin())
+  // Upsert bias (moderator by default); biasValue === 0 deletes the row
   .post(
     '/',
     async ({ t, prisma, body, set }) => {
@@ -130,7 +129,7 @@ export const websiteNovelBiases = new Elysia({
     },
   )
 
-  // Delete bias by ID (admin only)
+  // Delete bias by ID (moderator by default)
   .delete(
     '/:id',
     async ({ t, prisma, params: { id } }) => {

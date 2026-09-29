@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Elysia } from 'elysia';
 import { HttpError } from '@/utils/errors';
+import { withRole } from './access';
 
-type Row = { id: string; email: string; username: string; name: string; role: string; password: string };
+type Row = { id: string; email: string; username: string; name: string; isUser: boolean; isAdmin: boolean; isGuest: boolean; userRoleId: string | null; adminRoleId?: string | null; password: string };
 let users: Row[] = [];
 let oauthUserId: string | null = null;
 const moved: string[] = [];
@@ -25,7 +26,7 @@ const fakePrisma = {
   create: async () => ({}),
   findUnique: async ({ where }: { where: { token: string } }) => {
    const user = users.find(u => `${u.id}-token` === where.token);
-   return user ? { expiresAt: new Date(Date.now() + 60_000), user } : null;
+   return user ? { expiresAt: new Date(Date.now() + 60_000), portal: 'user', user } : null;
   },
  },
  $transaction: async (queries: Promise<unknown>[]) => Promise.all(queries),
@@ -44,10 +45,11 @@ mock.module('@/lib/auth', () => ({
  },
 }));
 const { accounts } = await import('@/routes/accounts');
+const { betterAuthRoutes } = await import('@/routes/better-auth');
 const { generateUniqueUsername } = await import('@/lib/auth/oauth');
 const app = new Elysia().error({ HttpError }).onError(({ error, set }) => {
  if (error instanceof HttpError) { set.status = error.statusCode; return { message: error.message }; }
-}).use(accounts);
+}).use(accounts).use(betterAuthRoutes);
 
 const exchange = (body: unknown = {}) => app.handle(new Request('http://localhost/auth/oauth/session', {
  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -55,9 +57,10 @@ const exchange = (body: unknown = {}) => app.handle(new Request('http://localhos
 beforeEach(() => {
  oauthUserId = null; moved.length = 0; signedOut = 0;
  users = [
-  { id: 'google-user', email: 'jane@example.com', username: 'JaneReader', name: 'Jane Reader', role: 'user', password: 'x' },
-  { id: 'guest', email: 'g@guest.storylens.local', username: 'QuietOwl', name: 'QuietOwl', role: 'guest', password: 'x' },
-  { id: 'other-user', email: 'o@example.com', username: 'Other', name: 'Other', role: 'user', password: 'x' },
+  withRole({ id: 'google-user', email: 'jane@example.com', username: 'JaneReader', name: 'Jane Reader', isUser: true, isAdmin: false, isGuest: false, userRoleId: 'role-reader', password: 'x' }),
+  withRole({ id: 'guest', email: 'g@guest.storylens.local', username: 'QuietOwl', name: 'QuietOwl', isUser: true, isAdmin: false, isGuest: true, userRoleId: 'role-guest', password: 'x' }),
+  withRole({ id: 'other-user', email: 'o@example.com', username: 'Other', name: 'Other', isUser: true, isAdmin: false, isGuest: false, userRoleId: 'role-reader', password: 'x' }),
+  withRole({ id: 'dashboard-user', email: 'd@example.com', username: 'Dash', name: 'Dash', isUser: false, isAdmin: true, isGuest: false, userRoleId: null, adminRoleId: null, password: 'x' }),
  ];
 });
 describe('OAuth session exchange', () => {
@@ -86,6 +89,11 @@ describe('OAuth session exchange', () => {
   oauthUserId = 'google-user';
   expect((await exchange({ guestToken: 'other-user-token' })).status).toBe(200);
   expect(moved).toEqual([]); expect(users.map(u => u.id)).toContain('other-user');
+ });
+ it('refuses dashboard accounts', async () => {
+  oauthUserId = 'dashboard-user';
+  expect((await exchange({ guestToken: 'guest-token' })).status).toBe(403);
+  expect(moved).toEqual([]);
  });
  it('keeps guarded and custom routes ahead of Better Auth', async () => {
   expect((await app.handle(new Request('http://localhost/auth/me'))).status).toBe(401);

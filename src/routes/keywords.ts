@@ -12,17 +12,28 @@ import {
 	NovelPlain,
 	ReplacementPlain,
 } from "@/lib/db";
-import {
-	assertOwnsResource,
-	shouldBeGuest,
-	shouldBeUser,
-} from "@/middleware/authorize";
+import { assertOwnsResource, authorize } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
 import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
 import { sanitizeObject } from "@/utils/sanitize";
+import {
+	assertHasName,
+	type Language,
+	nameField,
+	translatedNameBody,
+} from "@/utils/translation";
 import { orderByIds, queryWeightedSearchIds } from "@/utils/weighted-search";
+
+/** A `name` sort column reads the request language's field. */
+function localizedSortColumn(column: string | undefined, lang: Language): string | undefined {
+	return column === "name" ? nameField(lang) : column;
+}
+
+function cleanName(value: string | null | undefined): string | null | undefined {
+	return value === undefined || value === null ? value : sanitizeObject(value).trim() || null;
+}
 
 const aliasShape = t.Object({
 	...KeywordAliasPlain.properties,
@@ -67,15 +78,18 @@ const keywordInclude = {
 
 export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 	.use(setup)
-	.use(shouldBeGuest())
+	.use(authorize('user'))
 
 	// Get all keywords with filters
 	.get(
 		"/",
-		async ({ prisma, query: { pagination, query, sorting } }) => {
+		async ({ prisma, lang, query: { pagination, query, sorting } }) => {
 			const { skip, take } = parsePaginationProps(pagination);
+			const name = nameField(lang);
+			const sortColumn = localizedSortColumn(sorting?.column, lang);
 
-			const where: Record<string, unknown> = {};
+			// Readers only see keywords named in their language.
+			const where: Record<string, unknown> = { [name]: { not: null } };
 
 			if (query?.categoryId) {
 				where.versions = { some: { categoryId: query.categoryId } };
@@ -92,15 +106,16 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			if (query?.search) {
 				const { ids, total } = await queryWeightedSearchIds(prisma, {
 					table: "Keyword",
-					primaryColumn: "name",
-					secondaryColumn: "name",
+					primaryColumn: name,
+					secondaryColumn: name,
 					search: query.search,
 					filters: {
 						novelId: query.novelId,
+						notNullColumn: name,
 					},
 					skip: skip ?? 0,
 					take: take ?? 25,
-					sortColumn: sorting?.column,
+					sortColumn,
 					sortDirection: sorting?.direction,
 				});
 
@@ -125,7 +140,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 					skip,
 					take,
 					include: keywordInclude,
-					orderBy: getNestedColumnObject(sorting?.column, sorting?.direction),
+					orderBy: getNestedColumnObject(sortColumn, sorting?.direction),
 				}),
 				prisma.keyword.count({ where }),
 			]);
@@ -202,13 +217,14 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 		},
 	)
 
-	// Create keyword (user + admin)
-	.use(shouldBeUser())
+	// Create keyword (reader and moderator)
 	.post(
 		"/",
 		async ({ t, prisma, body, authedUser }) => {
+			assertHasName(body, t);
 			const sanitizedBody = sanitizeObject(body);
-			const { name, novelId, categoryId, natureId } = sanitizedBody;
+			const { novelId, categoryId, natureId } = sanitizedBody;
+			const names = { nameAr: cleanName(body.nameAr), nameEn: cleanName(body.nameEn) };
 
 			const [category, nature, novel] = await Promise.all([
 				prisma.keywordCategory.findUnique({ where: { id: categoryId } }),
@@ -220,7 +236,15 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			if (!nature) throw new HttpError({ statusCode: 404, message: t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }) });
 			if (!novel) throw new HttpError({ statusCode: 404, message: t({ en: "Novel not found", ar: "الرواية غير موجودة" }) });
 
-			const existing = await prisma.keyword.findFirst({ where: { name, novelId } });
+			const existing = await prisma.keyword.findFirst({
+				where: {
+					novelId,
+					OR: [
+						...(names.nameAr ? [{ nameAr: names.nameAr }] : []),
+						...(names.nameEn ? [{ nameEn: names.nameEn }] : []),
+					],
+				},
+			});
 			if (existing) {
 				throw new HttpError({
 					message: t({ en: "Keyword name already exists for this novel", ar: "اسم الكلمة المفتاحية موجود بالفعل لهذه الرواية" }),
@@ -230,7 +254,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			const keyword = await prisma.$transaction(async (tx) => {
 				const kw = await tx.keyword.create({
 					data: {
-						name,
+						...names,
 						matchingType: sanitizedBody.matchingType ?? "FULL",
 						novelId,
 						createdById: authedUser.id,
@@ -260,7 +284,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 		},
 		{
 			body: t.Object({
-				name: t.String({ minLength: 1 }),
+				...translatedNameBody,
 				description: t.Optional(t.String()),
 				matchingType: t.Optional(MatchingType),
 				novelId: t.String({ format: "uuid" }),
@@ -274,7 +298,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 		},
 	)
 
-	// Update keyword (own only for user, all for admin)
+	// Update keyword (own for readers, any for moderators)
 	.put(
 		"/:id",
 		async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -290,10 +314,22 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			assertOwnsResource(existingKeyword.createdById, authedUser);
 
 			const sanitizedBody = sanitizeObject(body);
+			const names = { nameAr: cleanName(body.nameAr), nameEn: cleanName(body.nameEn) };
+			assertHasName(
+				{
+					nameAr: names.nameAr === undefined ? existingKeyword.nameAr : names.nameAr,
+					nameEn: names.nameEn === undefined ? existingKeyword.nameEn : names.nameEn,
+				},
+				t,
+			);
 
-			if (sanitizedBody.name && sanitizedBody.name !== existingKeyword.name) {
+			const changed = [
+				...(names.nameAr && names.nameAr !== existingKeyword.nameAr ? [{ nameAr: names.nameAr }] : []),
+				...(names.nameEn && names.nameEn !== existingKeyword.nameEn ? [{ nameEn: names.nameEn }] : []),
+			];
+			if (changed.length) {
 				const conflict = await prisma.keyword.findFirst({
-					where: { name: sanitizedBody.name, novelId: existingKeyword.novelId, id: { not: id } },
+					where: { novelId: existingKeyword.novelId, id: { not: id }, OR: changed },
 				});
 				if (conflict) {
 					throw new HttpError({
@@ -305,7 +341,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			const keyword = await prisma.keyword.update({
 				where: { id },
 				data: {
-					name: sanitizedBody.name,
+					...names,
 					matchingType: sanitizedBody.matchingType,
 				},
 				include: keywordInclude,
@@ -318,7 +354,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				id: t.String({ format: "uuid" }),
 			}),
 			body: t.Object({
-				name: t.Optional(t.String({ minLength: 1 })),
+				...translatedNameBody,
 				matchingType: t.Optional(MatchingType),
 			}),
 			response: {
@@ -327,7 +363,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 		},
 	)
 
-	// Delete keyword (own only for user, all for admin)
+	// Delete keyword (own for readers, any for moderators)
 	.delete(
 		"/:id",
 		async ({ t, prisma, params: { id }, authedUser }) => {

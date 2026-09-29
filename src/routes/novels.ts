@@ -1,41 +1,64 @@
 import { ChapterPlain, FilePlain, NovelPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
-import {
-  isAdmin,
-  shouldBeAdmin,
-  shouldBeGuest,
-  shouldBeUser,
-} from '@/middleware/authorize';
+import { authorize, canModerate } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitize, sanitizeObject } from '@/utils/sanitize';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
+import {
+  assertHasName,
+  descriptionField,
+  type Language,
+  nameField,
+  translatedDescriptionBody,
+  translatedNameBody,
+} from '@/utils/translation';
+
+/** `name`/`description` sort columns read the request language's field. */
+function localizedSortColumn(column: string | undefined, lang: Language): string | undefined {
+  if (column === 'name') return nameField(lang);
+  if (column === 'description') return descriptionField(lang);
+  return column;
+}
+
+function cleanText(value: string | null | undefined): string | null | undefined {
+  return value === undefined || value === null ? value : sanitize(value) || null;
+}
+
+function cleanNames(body: { nameAr?: string | null; nameEn?: string | null }) {
+  return { nameAr: cleanText(body.nameAr), nameEn: cleanText(body.nameEn) };
+}
 
 export const novels = new Elysia({
   prefix: '/novels',
   tags: ['Novels'],
 })
   .use(setup)
-  .use(shouldBeGuest())
+  .use(authorize('user'))
 
   // Get all novels with pagination
   .get(
     '/',
-    async ({ prisma, query: { pagination, query, sorting } }) => {
+    async ({ prisma, lang, query: { pagination, query, sorting } }) => {
       const { skip, take } = parsePaginationProps(pagination);
+      const name = nameField(lang);
+      const description = descriptionField(lang);
 
-      const where = query?.search
+      // Readers only see novels named in their language.
+      const where = {
+        [name]: { not: null },
+        ...(query?.search
         ? {
             OR: [
               {
-                name: {
+                [name]: {
                   contains: query?.search,
                   mode: 'insensitive' as const,
                 },
               },
               {
-                description: {
+                [description]: {
                   contains: query?.search,
                   mode: 'insensitive' as const,
                 },
@@ -47,7 +70,8 @@ export const novels = new Elysia({
               },
             ],
           }
-        : {};
+        : {}),
+      };
 
       const [novels, total] = await Promise.all([
         prisma.novel.findMany({
@@ -63,7 +87,10 @@ export const novels = new Elysia({
               },
             },
           },
-          orderBy: getNestedColumnObject(sorting?.column, sorting?.direction),
+          orderBy: getNestedColumnObject(
+            localizedSortColumn(sorting?.column, lang),
+            sorting?.direction,
+          ),
         }),
         prisma.novel.count({ where }),
       ]);
@@ -143,20 +170,43 @@ export const novels = new Elysia({
     },
   )
 
-  // Create novel (user: name + slugs only; admin: full)
-  .use(shouldBeUser())
+  // Create novel (reader: names, slugs and context only; moderator: full).
+  // A novel already known by one of the slugs gets its missing translations filled instead.
   .post(
     '/',
     async ({ prisma, body, authedUser, t }) => {
-      if (isAdmin(authedUser)) {
+      assertHasName(body, t);
+      const names = cleanNames(body);
+      const slugs = body.slugs?.map((slug) => sanitize(slug)) ?? [];
+      const context = body.context ? sanitize(body.context) : undefined;
+
+      const known = slugs.length
+        ? await prisma.novel.findFirst({ where: { slugs: { hasSome: slugs } } })
+        : null;
+      if (known) {
+        return prisma.novel.update({
+          where: { id: known.id },
+          data: {
+            nameAr: known.nameAr ?? names.nameAr,
+            nameEn: known.nameEn ?? names.nameEn,
+            slugs: [...new Set([...known.slugs, ...slugs])],
+            context: known.context?.trim() ? undefined : context,
+          },
+          include: { image: true },
+        });
+      }
+
+      if (canModerate(authedUser)) {
         const sanitizedBody = sanitizeObject(body);
 
         const novel = await prisma.novel.create({
           data: {
-            name: sanitizedBody.name,
-            description: sanitizedBody.description,
+            ...names,
+            descriptionAr: cleanText(sanitizedBody.descriptionAr),
+            descriptionEn: cleanText(sanitizedBody.descriptionEn),
+            context: sanitizedBody.context,
             imageId: sanitizedBody.imageId,
-            slugs: sanitizedBody.slugs ?? [],
+            slugs,
             createdById: authedUser.id,
           },
           include: {
@@ -167,13 +217,11 @@ export const novels = new Elysia({
         return novel;
       }
 
-      const name = sanitize(body.name);
-      const slugs = body.slugs?.map((slug) => sanitize(slug)) ?? [];
-
       const novel = await prisma.novel.create({
         data: {
-          name,
+          ...names,
           slugs,
+          context,
           createdById: authedUser.id,
         },
         include: {
@@ -185,8 +233,9 @@ export const novels = new Elysia({
     },
     {
       body: t.Object({
-        name: t.String({ minLength: 1 }),
-        description: t.Optional(t.String({ minLength: 1 })),
+        ...translatedNameBody,
+        ...translatedDescriptionBody,
+        context: t.Optional(t.String({ minLength: 1, maxLength: 20000 })),
         imageId: t.Optional(t.String({ format: 'uuid' })),
         slugs: t.Optional(t.Array(t.String({ minLength: 1 }))),
       }),
@@ -201,7 +250,7 @@ export const novels = new Elysia({
     },
   )
 
-  // Update novel (user: slugs only; admin: full)
+  // Update novel (reader: slugs, plus context and translations while they are empty; moderator: full)
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -219,12 +268,24 @@ export const novels = new Elysia({
         });
       }
 
-      if (!isAdmin(authedUser)) {
+      if (!canModerate(authedUser)) {
         const slugs = body.slugs?.map((slug) => sanitize(slug)) ?? existingNovel.slugs;
+        // Readers may fill a missing context; only moderators can change an existing one.
+        const context =
+          body.context && !existingNovel.context?.trim()
+            ? sanitize(body.context)
+            : undefined;
+        // Readers may add a missing translation of the name, not change an existing one.
+        const names = cleanNames(body);
 
         const novel = await prisma.novel.update({
           where: { id },
-          data: { slugs },
+          data: {
+            slugs,
+            context,
+            nameAr: existingNovel.nameAr ? undefined : names.nameAr,
+            nameEn: existingNovel.nameEn ? undefined : names.nameEn,
+          },
           include: { image: true },
         });
 
@@ -232,12 +293,22 @@ export const novels = new Elysia({
       }
 
       const sanitizedBody = sanitizeObject(body);
+      const names = cleanNames(body);
+      assertHasName(
+        {
+          nameAr: names.nameAr === undefined ? existingNovel.nameAr : names.nameAr,
+          nameEn: names.nameEn === undefined ? existingNovel.nameEn : names.nameEn,
+        },
+        t,
+      );
 
       const novel = await prisma.novel.update({
         where: { id },
         data: {
-          name: sanitizedBody.name,
-          description: sanitizedBody.description,
+          ...names,
+          descriptionAr: cleanText(sanitizedBody.descriptionAr),
+          descriptionEn: cleanText(sanitizedBody.descriptionEn),
+          context: sanitizedBody.context,
           imageId: sanitizedBody.imageId,
           slugs: sanitizedBody.slugs,
         },
@@ -253,8 +324,9 @@ export const novels = new Elysia({
         id: t.String({ format: 'uuid' }),
       }),
       body: t.Object({
-        name: t.String({ minLength: 1 }),
-        description: t.Optional(t.String({ minLength: 1 })),
+        ...translatedNameBody,
+        ...translatedDescriptionBody,
+        context: t.Optional(t.String({ minLength: 1, maxLength: 20000 })),
         imageId: t.Optional(t.String({ format: 'uuid' })),
         slugs: t.Optional(t.Array(t.String({ minLength: 1 }))),
       }),
@@ -269,8 +341,61 @@ export const novels = new Elysia({
     },
   )
 
-  // Delete novel (admin only)
-  .use(shouldBeAdmin())
+  // Set novel context (reader: only while it is empty, e.g. AI auto-fill; moderator: always)
+  .put(
+    '/:id/context',
+    async ({ t, prisma, params: { id }, body, authedUser }) => {
+      const existingNovel = await prisma.novel.findUnique({
+        where: { id },
+      });
+
+      if (!existingNovel) {
+        throw new HttpError({
+          statusCode: 404,
+          message: t({
+            en: 'Novel not found',
+            ar: 'الرواية غير موجودة',
+          }),
+        });
+      }
+
+      if (!canModerate(authedUser) && existingNovel.context?.trim()) {
+        throw new HttpError({
+          statusCode: 403,
+          message: t({
+            en: 'Only moderators can change an existing novel context',
+            ar: 'يمكن للمشرفين فقط تعديل سياق الرواية الموجود',
+          }),
+        });
+      }
+
+      const novel = await prisma.novel.update({
+        where: { id },
+        data: { context: sanitize(body.context) },
+        include: { image: true },
+      });
+
+      return novel;
+    },
+    {
+      params: t.Object({
+        id: t.String({ format: 'uuid' }),
+      }),
+      body: t.Object({
+        context: t.String({ minLength: 1, maxLength: 20000 }),
+      }),
+      response: {
+        200: t.Composite([
+          NovelPlain,
+          t.Object({
+            image: t.Nullable(FilePlain),
+          }),
+        ]),
+      },
+    },
+  )
+
+  // Delete novel (moderator by default)
   .delete(
     '/:id',
     async ({ t, prisma, params: { id } }) => {

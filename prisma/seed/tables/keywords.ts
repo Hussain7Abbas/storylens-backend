@@ -21,40 +21,53 @@ export async function seedKeywords(prisma: PrismaClient) {
     throw new Error('No keyword natures found');
   }
 
-  const novelByName = indexBy(novels, (novel) => novel.name);
+  const novelByName = indexBy(novels, (novel) => novel.nameAr ?? novel.nameEn ?? "");
   const categoryByName = indexBy(keywordCategories, (category) => category.nameAr ?? category.nameEn ?? "");
   const natureByName = indexBy(keywordNatures, (nature) => nature.nameAr ?? nature.nameEn ?? "");
 
   const seen = new Set<string>();
 
-  await prisma.keyword.createMany({
-    data: seedKeywordsData.flatMap((keyword) => {
-      const novel = novelByName.get(keyword.novelName);
-      const { category, nature } = mapLegacyRole(keyword.role);
-      const categoryRecord = categoryByName.get(category);
-      const natureRecord = natureByName.get(nature);
+  const rows = seedKeywordsData.flatMap((keyword) => {
+    const novel = novelByName.get(keyword.novelName);
+    const { category, nature } = mapLegacyRole(keyword.role);
+    const categoryRecord = categoryByName.get(category);
+    const natureRecord = natureByName.get(nature);
 
-      if (!novel || !categoryRecord || !natureRecord) {
-        return [];
-      }
+    if (!novel || !categoryRecord || !natureRecord) {
+      return [];
+    }
 
-      const name = keyword.name.trim();
-      const dedupeKey = `${novel.id}::${name}`;
-      if (seen.has(dedupeKey)) {
-        return [];
-      }
-      seen.add(dedupeKey);
+    const name = keyword.name.trim();
+    const dedupeKey = `${novel.id}::${name}`;
+    if (seen.has(dedupeKey)) {
+      return [];
+    }
+    seen.add(dedupeKey);
 
-      return [
-        {
-          name,
-          description: keyword.description,
-          novelId: novel.id,
-          categoryId: categoryRecord.id,
-          natureId: natureRecord.id,
-          ...(keyword.timestamp ? { createdAt: new Date(keyword.timestamp) } : {}),
-        },
-      ];
-    }),
+    return [{
+      id: crypto.randomUUID(),
+      nameAr: name,
+      description: keyword.description,
+      novelId: novel.id,
+      categoryId: categoryRecord.id,
+      natureId: natureRecord.id,
+      ...(keyword.timestamp ? { createdAt: new Date(keyword.timestamp) } : {}),
+    }];
   });
+
+  await prisma.$transaction([
+    prisma.keyword.createMany({
+      data: rows.map(({ id, nameAr, novelId, createdAt }) => ({ id, nameAr, novelId, createdAt })),
+    }),
+    prisma.keywordVersion.createMany({
+      data: rows.map(({ id, description, categoryId, natureId, createdAt }) => ({
+        keywordId: id,
+        description,
+        categoryId,
+        natureId,
+        startingChapter: 0,
+        createdAt,
+      })),
+    }),
+  ]);
 }

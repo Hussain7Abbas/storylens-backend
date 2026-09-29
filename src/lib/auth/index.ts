@@ -3,6 +3,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db';
 import { env } from '@/env';
+import { SYSTEM_ROLES, systemRoleId } from '@/lib/permissions';
 import { generateUniqueUsername } from './oauth';
 
 export const googleEnabled = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
@@ -58,11 +59,33 @@ export const auth = betterAuth({
         required: false,
         input: false,
       },
-      role: {
+      isUser: {
+        type: 'boolean',
+        required: false,
+        input: false,
+        defaultValue: true,
+      },
+      isAdmin: {
+        type: 'boolean',
+        required: false,
+        input: false,
+        defaultValue: false,
+      },
+      isGuest: {
+        type: 'boolean',
+        required: false,
+        input: false,
+        defaultValue: false,
+      },
+      userRoleId: {
         type: 'string',
         required: false,
         input: false,
-        defaultValue: 'guest',
+      },
+      adminRoleId: {
+        type: 'string',
+        required: false,
+        input: false,
       },
       password: {
         type: 'string',
@@ -76,12 +99,16 @@ export const auth = betterAuth({
     user: {
       create: {
         // OAuth sign-up: the Prisma model needs a unique username and a
-        // password hash, and a provider-verified account is a registered user.
+        // password hash, and a provider-verified account is a registered
+        // reader. Dashboard access is only granted from the dashboard.
         before: async (user) => ({
           data: {
             ...user,
             username: await generateUniqueUsername(prisma, user.name),
-            role: 'user',
+            isUser: true,
+            isAdmin: false,
+            isGuest: false,
+            userRoleId: await systemRoleId(prisma, SYSTEM_ROLES.reader),
             password: await bcrypt.hash(crypto.randomUUID(), 12),
           },
         }),

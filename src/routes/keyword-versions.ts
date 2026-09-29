@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordCategoryPlain, KeywordNaturePlain, KeywordVersionPlain } from "@/lib/db";
-import { assertOwnsResource, isAdmin, shouldBeGuest, shouldBeUser } from "@/middleware/authorize";
+import { assertOwnsResource, authorize, canModerate } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
@@ -22,7 +22,7 @@ const versionInclude = {
 
 export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: ["Keywords"] })
 	.use(setup)
-	.use(shouldBeGuest())
+	.use(authorize('user'))
 
 	.get(
 		"/",
@@ -64,7 +64,6 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 		},
 	)
 
-	.use(shouldBeUser())
 
 	.post(
 		"/",
@@ -92,7 +91,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 			let startingChapter: number;
 			let endingChapter: number | null = null;
 
-			if (isAdmin(authedUser)) {
+			if (canModerate(authedUser)) {
 				startingChapter = sanitizedBody.startingChapter ?? sanitizedBody.currentChapter ?? 0;
 				endingChapter = sanitizedBody.endingChapter ?? null;
 			} else {
@@ -188,7 +187,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				imageId: sanitizedBody.imageId,
 			};
 
-			if (isAdmin(authedUser)) {
+			if (canModerate(authedUser)) {
 				if (sanitizedBody.startingChapter !== undefined) updateData.startingChapter = sanitizedBody.startingChapter;
 				if (sanitizedBody.endingChapter !== undefined) updateData.endingChapter = sanitizedBody.endingChapter;
 			}

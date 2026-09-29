@@ -11,16 +11,16 @@ export async function seedKeywordReplacement(prisma: PrismaClient) {
   }
 
   const keywords = await prisma.keyword.findMany({
-    select: { id: true, name: true, novelId: true },
+    select: { id: true, nameAr: true, novelId: true },
   });
 
-  const novelByName = indexBy(novels, (novel) => novel.name);
+  const novelByName = indexBy(novels, (novel) => novel.nameAr ?? novel.nameEn ?? '');
   const keywordByNovelAndName = new Map<string, string>();
 
   for (const keyword of keywords) {
-    if (!keyword.name) continue;
+    if (!keyword.nameAr) continue;
     keywordByNovelAndName.set(
-      `${keyword.novelId}:${keyword.name.trim()}`,
+      `${keyword.novelId}:${keyword.nameAr.trim()}`,
       keyword.id,
     );
   }

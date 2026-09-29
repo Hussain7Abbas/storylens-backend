@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, Replacement } from '@prisma/client';
 import {
   KeywordPlain,
   MatchingType,
@@ -6,7 +6,7 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
-import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
+import { assertOwnsResource, authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitizeObject } from '@/utils/sanitize';
@@ -22,7 +22,7 @@ export const replacements = new Elysia({
   tags: ['Replacements'],
 })
   .use(setup)
-  .use(shouldBeGuest())
+  .use(authorize('user'))
 
   // Get all Replacements with filters
   .get(
@@ -158,8 +158,7 @@ export const replacements = new Elysia({
     },
   )
 
-  // Create replacement (admin only)
-  .use(shouldBeAdmin())
+  // Create replacement (readers and moderators)
   .post(
     '/',
     async ({ t, prisma, body, authedUser }) => {
@@ -201,12 +200,18 @@ export const replacements = new Elysia({
     },
   )
 
-  // Update replacement (admin only)
+  // Update replacement (own for readers, any for moderators)
   .put(
     '/:id',
-    async ({ t, prisma, params: { id }, body }) => {
+    async ({ t, prisma, params: { id }, body, authedUser }) => {
       const sanitizedBody = sanitizeObject({ ...body, id });
-      await validateReplacement(sanitizedBody, prisma, t, 'update');
+      const existingReplacement = await validateReplacement(
+        sanitizedBody,
+        prisma,
+        t,
+        'update',
+      );
+      assertOwnsResource(existingReplacement?.createdById, authedUser);
       const keyword = await checkChainReplacement(sanitizedBody, prisma);
 
       const replacement = await prisma.replacement.update({
@@ -245,10 +250,10 @@ export const replacements = new Elysia({
     },
   )
 
-  // Delete replacement (admin only)
+  // Delete replacement (own for readers, any for moderators)
   .delete(
     '/:id',
-    async ({ t, prisma, params: { id } }) => {
+    async ({ t, prisma, params: { id }, authedUser }) => {
       const existingReplacement = await prisma.replacement.findUnique({
         where: { id },
       });
@@ -262,6 +267,8 @@ export const replacements = new Elysia({
           }),
         });
       }
+
+      assertOwnsResource(existingReplacement.createdById, authedUser);
 
       await prisma.replacement.delete({
         where: { id },
@@ -284,13 +291,15 @@ async function validateReplacement(
   prisma: PrismaClient,
   t: ({ en, ar }: { en: string; ar: string }) => string,
   mode: 'create' | 'update',
-) {
+): Promise<Replacement | null> {
+  let currentReplacement: Replacement | null = null;
+
   if (mode === 'update') {
-    const existingReplacement = await prisma.replacement.findUnique({
+    currentReplacement = await prisma.replacement.findUnique({
       where: { id: body.id },
     });
 
-    if (!existingReplacement) {
+    if (!currentReplacement) {
       throw new HttpError({
         statusCode: 404,
         message: t({
@@ -334,6 +343,8 @@ async function validateReplacement(
       }),
     });
   }
+
+  return currentReplacement;
 }
 
 async function checkChainReplacement(
@@ -342,7 +353,7 @@ async function checkChainReplacement(
 ) {
   const keyword = await prisma.keyword.findFirst({
     where: {
-      name: body.to,
+      OR: [{ nameAr: body.to }, { nameEn: body.to }],
       novelId: body.novelId,
     },
   });

@@ -1,7 +1,7 @@
-.PHONY: help install dev build start typecheck test \
+.PHONY: help install dev build start typecheck test deprecations \
 	docker-up docker-down docker-logs \
 	db-generate db-migrate-dev db-migrate-deploy db-reset db-seed db-studio storage-seed setup \
-	pm2-start pm2-stop pm2-restart pm2-delete sync set-review-version
+	pm2-start pm2-stop pm2-restart pm2-delete sync set-review-version seed-dashboard-admin
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ECOSYSTEM := $(ROOT)/ecosystem.config.cjs
@@ -26,6 +26,7 @@ help:
 	@echo "  $(GREEN)start$(RESET)                run production build"
 	@echo "  $(GREEN)typecheck$(RESET)            TypeScript check"
 	@echo "  $(GREEN)test$(RESET)                 run tests"
+	@echo "  $(GREEN)deprecations$(RESET)         list deprecations; fail on expired or undated ones"
 	@echo "  $(GREEN)docker-up$(RESET)            start Postgres"
 	@echo "  $(GREEN)docker-down$(RESET)          stop Postgres"
 	@echo "  $(GREEN)db-generate$(RESET)          prisma generate"
@@ -37,12 +38,13 @@ help:
 	@echo "  $(GREEN)storage-seed$(RESET)         seed storage bucket"
 	@echo ""
 	@echo "$(BLUE)Deploy$(RESET)"
-	@echo "  $(GREEN)sync$(RESET)                 pm2-stop + git pull + db-generate + db-migrate-deploy + build + pm2-restart"
+	@echo "  $(GREEN)sync$(RESET)                 pm2-stop + git pull + install + db-generate + db-migrate-deploy + build + pm2-restart"
 	@echo "  $(GREEN)pm2-start$(RESET)            start API with PM2"
 	@echo "  $(GREEN)pm2-stop$(RESET)             stop PM2 API"
 	@echo "  $(GREEN)pm2-restart$(RESET)          restart PM2 API (starts it if missing)"
 	@echo "  $(GREEN)pm2-delete$(RESET)           remove API from PM2"
 	@echo "  $(GREEN)set-review-version$(RESET)   set Review_Version config ($(YELLOW)VERSION=x.y.z$(RESET))"
+	@echo "  $(GREEN)seed-dashboard-admin$(RESET) create or reset the dashboard super admin from DASHBOARD_ADMIN_*"
 	@echo ""
 
 install:
@@ -64,6 +66,9 @@ typecheck:
 
 test:
 	@cd "$(ROOT)" && bun run test
+
+deprecations:
+	@cd "$(ROOT)" && bun run deprecations
 
 docker-up:
 	@cd "$(ROOT)" && docker compose up -d
@@ -99,6 +104,9 @@ set-review-version:
 	@test -n "$(VERSION)" || { echo "Usage: make set-review-version VERSION=x.y.z"; exit 1; }
 	@cd "$(ROOT)" && bun run review-version:set "$(VERSION)"
 
+seed-dashboard-admin:
+	@cd "$(ROOT)" && bun run dashboard-admin:seed
+
 pm2-start:
 	@cd "$(ROOT)" && pm2 start "$(ECOSYSTEM)" --update-env && pm2 save
 
@@ -116,6 +124,7 @@ sync:
 	@$(MAKE) --no-print-directory pm2-stop || echo "$(YELLOW)API was not running$(RESET)"
 	@cd "$(ROOT)" && { \
 		git pull --ff-only && \
+		$(MAKE) --no-print-directory install && \
 		$(MAKE) --no-print-directory db-generate && \
 		$(MAKE) --no-print-directory db-migrate-deploy && \
 		$(MAKE) --no-print-directory build; \

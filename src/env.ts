@@ -10,9 +10,10 @@ export const env = createEnv({
     PORT: z.coerce.number().default(3000),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     DATABASE_URL: z.url(),
-    ROOT_USERNAME: z.string().optional(),
-    ROOT_PASSWORD: z.string().optional(),
-    ROOT_EMAIL: z.string().optional(),
+    // The seeded dashboard super admin (`bun run db:seed` or `make seed-dashboard-admin`).
+    DASHBOARD_ADMIN_USERNAME: z.string().optional(),
+    DASHBOARD_ADMIN_PASSWORD: z.string().min(8).optional(),
+    DASHBOARD_ADMIN_EMAIL: z.string().optional(),
     BETTER_AUTH_SECRET: z.string(),
     BETTER_AUTH_URL: z.string().optional(),
     // Website origin that hosts account pages; OAuth redirects back to it.

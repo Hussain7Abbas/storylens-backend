@@ -6,7 +6,7 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
-import { shouldBeAdmin, shouldBeGuest } from '@/middleware/authorize';
+import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
@@ -16,7 +16,7 @@ export const keywordsChapters = new Elysia({
   tags: ['KeywordsChapters'],
 })
   .use(setup)
-  .use(shouldBeGuest())
+  .use(authorize('user'))
 
   // Get all keyword-chapter relationships for a specific chapter
   .get(
@@ -187,8 +187,7 @@ export const keywordsChapters = new Elysia({
     },
   )
 
-  // Create keyword-chapter relationship (admin only)
-  .use(shouldBeAdmin())
+  // Create keyword-chapter relationship (moderator by default)
   .post(
     '/',
     async ({ t, prisma, body }) => {
