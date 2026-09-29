@@ -1,18 +1,22 @@
 import type { Prisma } from '@prisma/client';
 import { Elysia, t } from 'elysia';
+import { MatchingType } from '@/lib/db';
 import { authorize } from '@/middleware/authorize';
 import { adminListQuery, pageArgs } from '@/schemas/admin';
+import { adminKeywordDetailSchema, keywordDetailInclude, styleBody } from '@/schemas/admin-keywords';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
-import { languageSchema, nameField } from '@/utils/translation';
+import { aliasNameColumns, aliasNames, languageSchema, nameField, scriptLanguage } from '@/utils/translation';
+import { assertStyleRefs, styleData } from './keyword-styles';
+import { lockKeywordVersions } from './version-ranges';
 
 type Tx = Prisma.TransactionClient;
 
 const keywordInclude = {
   // The base version (chapter 0 onwards) holds the description shown next to the name.
   versions: { orderBy: { startingChapter: 'asc' }, take: 1, select: { description: true } },
-  aliases: { select: { name: true }, orderBy: { createdAt: 'asc' } },
+  aliases: { select: { name: true, nameAr: true, nameEn: true }, orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.KeywordInclude;
 
 type KeywordRow = Prisma.KeywordGetPayload<{ include: typeof keywordInclude }>;
@@ -33,7 +37,10 @@ function toKeyword({ versions, aliases, ...keyword }: KeywordRow) {
     nameAr: keyword.nameAr,
     nameEn: keyword.nameEn,
     description: versions[0]?.description ?? null,
-    aliases: aliases.map((alias) => alias.name),
+    // Every name of each alias, translations included.
+    aliases: [...new Set(aliases.flatMap((alias) => [alias.name, ...Object.values(aliasNames(alias))]))].filter(
+      (name): name is string => !!name,
+    ),
   };
 }
 
@@ -43,6 +50,12 @@ function notFound(): never {
 
 function conflict(message: string): never {
   throw new HttpError({ statusCode: 409, message });
+}
+
+function assertSourceHasOnlyBaseVersion(source: { versions: unknown[] }) {
+  if (source.versions.length > 1) {
+    conflict('A keyword with later versions cannot be merged without losing its version history');
+  }
 }
 
 async function loadPair(tx: Tx, id: string, targetId: string) {
@@ -58,18 +71,64 @@ async function loadPair(tx: Tx, id: string, targetId: string) {
 
 /**
  * Moves what hangs off `source` (aliases, chapter links, replacements) onto
- * `target`, then deletes `source`. Aliases whose name the target already has are dropped.
+ * `target`, then deletes `source`. Same-name aliases combine compatible translations.
  */
 async function absorb(
   tx: Tx,
-  source: { id: string; aliases: { id: string; name: string }[] },
-  target: { id: string; aliases: { name: string }[] },
+  source: { id: string; aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[] },
+  target: { id: string; aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[] },
 ) {
-  const taken = new Set(target.aliases.map((alias) => alias.name));
+  const byName = new Map(target.aliases.map((alias) => [alias.name, alias]));
+  const represented = new Set(target.aliases.flatMap((alias) => [alias.name, ...Object.values(aliasNames(alias))]));
   for (const alias of source.aliases) {
-    if (taken.has(alias.name)) continue;
-    await tx.keywordAlias.update({ where: { id: alias.id }, data: { keywordId: target.id } });
-    taken.add(alias.name);
+    const existing = byName.get(alias.name);
+    if (!existing) {
+      const distinctName = represented.has(alias.name)
+        ? Object.values(aliasNames(alias)).find((name) => name && !represented.has(name))
+        : alias.name;
+      if (!distinctName) continue;
+      const renamed = distinctName !== alias.name;
+      const columns = renamed ? aliasNameColumns(distinctName) : { nameAr: alias.nameAr, nameEn: alias.nameEn };
+      await tx.keywordAlias.update({
+        where: { id: alias.id },
+        data: { keywordId: target.id, ...(renamed ? { name: distinctName, ...columns } : {}) },
+      });
+      byName.set(distinctName, { ...alias, name: distinctName, ...columns });
+      represented.add(distinctName);
+      if (!renamed) Object.values(aliasNames(alias)).forEach((name) => name && represented.add(name));
+      continue;
+    }
+    const incomingNames = aliasNames(alias);
+    const existingNames = aliasNames(existing);
+    const conflictingNames = (['ar', 'en'] as const).flatMap((language) =>
+      incomingNames[language] && existingNames[language] && incomingNames[language] !== existingNames[language]
+        ? [incomingNames[language]]
+        : [],
+    );
+    if (conflictingNames.length) {
+      // The primary name is taken, but a distinct translation can become the
+      // moved alias's primary name without losing either translation.
+      const distinctName = conflictingNames.find((name) => name && !represented.has(name));
+      if (distinctName) {
+        const columns = aliasNameColumns(distinctName);
+        await tx.keywordAlias.update({
+          where: { id: alias.id },
+          data: { keywordId: target.id, name: distinctName, ...columns },
+        });
+        byName.set(distinctName, { ...alias, name: distinctName, ...columns });
+        represented.add(distinctName);
+      }
+      continue;
+    }
+    const nameAr = existingNames.ar ?? incomingNames.ar;
+    const nameEn = existingNames.en ?? incomingNames.en;
+    if (nameAr !== existing.nameAr || nameEn !== existing.nameEn) {
+      await tx.keywordAlias.update({ where: { id: existing.id }, data: { nameAr, nameEn } });
+      existing.nameAr = nameAr;
+      existing.nameEn = nameEn;
+      if (nameAr) represented.add(nameAr);
+      if (nameEn) represented.add(nameEn);
+    }
   }
   await tx.keywordsChapters.updateMany({ where: { keywordId: source.id }, data: { keywordId: target.id } });
   await tx.replacement.updateMany({ where: { keywordId: source.id }, data: { keywordId: target.id } });
@@ -79,27 +138,38 @@ async function absorb(
 /** Adds the source keyword's names (either language) as aliases of the target. */
 async function addNamesAsAliases(
   tx: Tx,
-  target: { id: string; nameAr: string | null; nameEn: string | null; aliases: { name: string }[] },
+  target: {
+    id: string;
+    nameAr: string | null;
+    nameEn: string | null;
+    aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[];
+  },
   source: {
     nameAr: string | null;
     nameEn: string | null;
     versions: { description: string | null; categoryId: string | null; natureId: string | null; imageId: string | null }[];
   },
 ) {
-  const taken = new Set([target.nameAr, target.nameEn, ...target.aliases.map((alias) => alias.name)]);
+  const taken = new Set([
+    target.nameAr,
+    target.nameEn,
+    ...target.aliases.flatMap((alias) => [alias.name, ...Object.values(aliasNames(alias))]),
+  ]);
   const base = source.versions[0];
   for (const name of [source.nameAr, source.nameEn]) {
     if (!name || taken.has(name)) continue;
-    await tx.keywordAlias.create({
+    const alias = await tx.keywordAlias.create({
       data: {
         keywordId: target.id,
         name,
+        ...aliasNameColumns(name),
         description: base?.description ?? null,
         categoryId: base?.categoryId ?? null,
         natureId: base?.natureId ?? null,
         imageId: base?.imageId ?? null,
       },
     });
+    target.aliases.push(alias);
     taken.add(name);
   }
 }
@@ -138,7 +208,17 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
               OR: [
                 { nameAr: { contains: search, mode: 'insensitive' } },
                 { nameEn: { contains: search, mode: 'insensitive' } },
-                { aliases: { some: { name: { contains: search, mode: 'insensitive' } } } },
+                {
+                  aliases: {
+                    some: {
+                      OR: [
+                        { name: { contains: search, mode: 'insensitive' } },
+                        { nameAr: { contains: search, mode: 'insensitive' } },
+                        { nameEn: { contains: search, mode: 'insensitive' } },
+                      ],
+                    },
+                  },
+                },
               ],
             }
           : {}),
@@ -167,6 +247,53 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
     },
   )
 
+  // A keyword always starts with its base version (chapter 0), which holds its details.
+  .post(
+    '/',
+    async ({ prisma, authedUser, body }) => {
+      const novel = await prisma.novel.findUnique({ where: { id: body.novelId }, select: { id: true } });
+      if (!novel) throw new HttpError({ statusCode: 404, message: 'Novel not found' });
+      const names = {
+        nameAr: body.nameAr ? sanitize(body.nameAr) || null : null,
+        nameEn: body.nameEn ? sanitize(body.nameEn) || null : null,
+      };
+      if (!names.nameAr && !names.nameEn) {
+        throw new HttpError({ statusCode: 422, message: 'An Arabic or English name is required' });
+      }
+      await assertStyleRefs(prisma, body);
+      for (const field of ['nameAr', 'nameEn'] as const) {
+        const name = names[field];
+        if (!name) continue;
+        const taken = await prisma.keyword.findFirst({
+          where: { novelId: novel.id, [field]: name },
+          select: { id: true },
+        });
+        if (taken) conflict(`Another keyword in this novel is already named “${name}”`);
+      }
+      return prisma.keyword.create({
+        data: {
+          ...names,
+          matchingType: body.matchingType ?? 'FULL',
+          novelId: novel.id,
+          createdById: authedUser.id,
+          versions: { create: { ...styleData(body), startingChapter: 0, createdById: authedUser.id } },
+        },
+        include: keywordDetailInclude,
+      });
+    },
+    {
+      body: t.Object({
+        novelId: t.String({ format: 'uuid' }),
+        nameAr: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
+        nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
+        matchingType: t.Optional(MatchingType),
+        ...styleBody,
+      }),
+      response: { 200: adminKeywordDetailSchema },
+      detail: { summary: 'Create a keyword with its base version' },
+    },
+  )
+
   .put(
     '/:id',
     async ({ prisma, params: { id }, body }) => {
@@ -191,7 +318,11 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         if (taken) conflict(`Another keyword in this novel is already named “${name}”`);
       }
 
-      const keyword = await prisma.keyword.update({ where: { id }, data: names, include: keywordInclude });
+      const keyword = await prisma.keyword.update({
+        where: { id },
+        data: { ...names, matchingType: body.matchingType },
+        include: keywordInclude,
+      });
       return toKeyword(keyword);
     },
     {
@@ -199,9 +330,29 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
       body: t.Object({
         nameAr: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
+        matchingType: t.Optional(MatchingType),
       }),
       response: { 200: adminKeywordSchema },
-      detail: { summary: 'Set a keyword’s Arabic and English names' },
+      detail: { summary: 'Set a keyword’s Arabic and English names and matching' },
+    },
+  )
+
+  // Aliases and versions cascade; chapter links go first, replacements keep their text.
+  .delete(
+    '/:id',
+    async ({ prisma, params: { id } }) => {
+      const existing = await prisma.keyword.findUnique({ where: { id }, include: keywordInclude });
+      if (!existing) notFound();
+      await prisma.$transaction([
+        prisma.keywordsChapters.deleteMany({ where: { keywordId: id } }),
+        prisma.keyword.delete({ where: { id } }),
+      ]);
+      return toKeyword(existing);
+    },
+    {
+      params: t.Object({ id: t.String({ format: 'uuid' }) }),
+      response: { 200: adminKeywordSchema },
+      detail: { summary: 'Delete a keyword with its aliases and versions' },
     },
   )
 
@@ -233,6 +384,72 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
     },
   )
 
+  // Link to an alias: the keyword's lone name is that alias in its other language. The alias
+  // takes the name, image, category and nature (see `mergeShared`), then the keyword is absorbed.
+  .post(
+    '/:id/link-alias',
+    async ({ prisma, params: { id }, body }) => {
+      const keyword = await prisma.$transaction(async (tx) => {
+        // Serialize links to one alias before reading its names. Otherwise two
+        // requests can both see an empty translation and the later one wins.
+        await tx.$queryRaw`SELECT id FROM "KeywordAlias" WHERE id = ${body.aliasId} FOR UPDATE`;
+        const [source, alias] = await Promise.all([
+          tx.keyword.findUnique({
+            where: { id },
+            include: { versions: { orderBy: { startingChapter: 'asc' } }, aliases: true },
+          }),
+          tx.keywordAlias.findUnique({
+            where: { id: body.aliasId },
+            include: { keyword: { include: { aliases: true } } },
+          }),
+        ]);
+        if (!source) notFound();
+        if (!alias) throw new HttpError({ statusCode: 404, message: 'Alias not found' });
+        if (alias.keywordId === source.id) conflict('A keyword cannot be linked to its own alias');
+        if (alias.keyword.novelId !== source.novelId) conflict('Both keywords must belong to the same novel');
+        assertSourceHasOnlyBaseVersion(source);
+        const name = source.nameAr ?? source.nameEn;
+        if (!name || (source.nameAr && source.nameEn)) {
+          conflict('Only a keyword named in one language can be linked to an alias');
+        }
+        // Older keywords keep English names in `nameAr`, so the script decides the language.
+        const language = scriptLanguage(name) ?? (source.nameAr ? 'ar' : 'en');
+        const names = aliasNames(alias);
+        const current = names[language];
+        if (current && current !== name) {
+          conflict(`The alias “${alias.name}” already has the ${language === 'ar' ? 'Arabic' : 'English'} name “${current}”`);
+        }
+        names[language] = name;
+
+        const base = source.versions[0];
+        const sourceNewer = !!base && base.updatedAt > alias.updatedAt;
+        const mergeShared = (own: string | null, other: string | null | undefined) =>
+          other == null ? own : own == null || sourceNewer ? other : own;
+        await tx.keywordAlias.update({
+          where: { id: alias.id },
+          data: {
+            nameAr: names.ar,
+            nameEn: names.en,
+            imageId: mergeShared(alias.imageId, base?.imageId),
+            categoryId: mergeShared(alias.categoryId, base?.categoryId),
+            natureId: mergeShared(alias.natureId, base?.natureId),
+          },
+        });
+        await absorb(tx, source, alias.keyword);
+        return tx.keyword.findUniqueOrThrow({ where: { id: alias.keywordId }, include: keywordInclude });
+      });
+      return toKeyword(keyword);
+    },
+    {
+      params: t.Object({ id: t.String({ format: 'uuid' }) }),
+      body: t.Object({ aliasId: t.String({ format: 'uuid' }) }),
+      response: { 200: adminKeywordSchema },
+      detail: {
+        summary: 'Merge a keyword into an alias as that alias’s name in the other language',
+      },
+    },
+  )
+
   // Alias: the keyword's names become aliases of the target character.
   .post(
     '/:id/alias',
@@ -260,16 +477,31 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
     async ({ prisma, params: { id }, body }) => {
       const keyword = await prisma.$transaction(async (tx) => {
         const { source, target } = await loadPair(tx, id, body.targetId);
+        await lockKeywordVersions(tx, target.id);
+        const targetVersions = await tx.keywordVersion.findMany({
+          where: { keywordId: target.id },
+          orderBy: { startingChapter: 'asc' },
+        });
         const base = source.versions[0];
-        const lastStart = Math.max(0, ...target.versions.map((version) => version.startingChapter));
+        const latest = targetVersions.at(-1);
+        const lastStart = latest?.startingChapter ?? -1;
         const startingChapter = body.startingChapter ?? lastStart + 1;
-        if (target.versions.some((version) => version.startingChapter === startingChapter)) {
+        if (targetVersions.some((version) => version.startingChapter === startingChapter)) {
           conflict(`The target already has a version starting at chapter ${startingChapter}`);
+        }
+        const previous = targetVersions.filter((version) => version.startingChapter < startingChapter).at(-1);
+        const next = targetVersions.find((version) => version.startingChapter > startingChapter);
+        if (previous && (previous.endingChapter === null || previous.endingChapter >= startingChapter)) {
+          await tx.keywordVersion.update({
+            where: { id: previous.id },
+            data: { endingChapter: startingChapter - 1 },
+          });
         }
         await tx.keywordVersion.create({
           data: {
             keywordId: target.id,
             startingChapter,
+            endingChapter: next ? next.startingChapter - 1 : null,
             description: base?.description ?? null,
             categoryId: base?.categoryId ?? null,
             natureId: base?.natureId ?? null,

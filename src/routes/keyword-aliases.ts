@@ -6,6 +6,7 @@ import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
 import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
 import { sanitizeObject } from "@/utils/sanitize";
+import { aliasNameColumns } from "@/utils/translation";
 
 const aliasInclude = { category: true, nature: true, image: true } as const;
 
@@ -82,6 +83,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 			const alias = await prisma.keywordAlias.create({
 				data: {
 					name,
+					...aliasNameColumns(name),
 					description: sanitizedBody.description ?? null,
 					matchingType: sanitizedBody.matchingType ?? "FULL",
 					categoryId: sanitizedBody.categoryId ?? null,
@@ -142,6 +144,9 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				where: { id },
 				data: {
 					name: sanitizedBody.name,
+					...(sanitizedBody.name && sanitizedBody.name !== existing.name
+						? aliasNameColumns(sanitizedBody.name, existing)
+						: {}),
 					description: sanitizedBody.description,
 					matchingType: sanitizedBody.matchingType,
 					categoryId: sanitizedBody.categoryId,

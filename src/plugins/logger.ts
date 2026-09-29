@@ -66,16 +66,11 @@ export const logError = ({
   console.warn(output);
 };
 
+// One status line per response, errors included. Nothing is logged in
+// `onError`: it runs before the error handler sets the real status, and the
+// handler already logs each error with its message (`logError`).
 export const logger = new Elysia({ name: 'logger' })
   .derive({ as: 'global' }, () => ({ start: Date.now() }))
-
-  .onError({ as: 'global' }, (ctx) => {
-    log({
-      method: ctx.request.method as Methods,
-      status: ctx.set.status as number,
-      path: ctx.path,
-    });
-  })
 
   .onAfterResponse({ as: 'global' }, (ctx) => {
     log({

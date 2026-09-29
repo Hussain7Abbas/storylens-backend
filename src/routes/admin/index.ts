@@ -2,6 +2,9 @@ import { Elysia } from 'elysia';
 import { adminAuth } from './auth';
 import { adminConfigs } from './configs';
 import { adminFiles } from './files';
+import { adminKeywordAliases } from './keyword-aliases';
+import { adminKeywordCategories, adminKeywordNatures } from './keyword-styles';
+import { adminKeywordVersions } from './keyword-versions';
 import { adminKeywords } from './keywords';
 import { adminNovels } from './novels';
 import { adminPermissions } from './permissions';
@@ -18,5 +21,9 @@ export const adminApi = new Elysia({ prefix: '/api/admin' })
   .use(adminPermissions)
   .use(adminNovels)
   .use(adminKeywords)
+  .use(adminKeywordAliases)
+  .use(adminKeywordVersions)
+  .use(adminKeywordCategories)
+  .use(adminKeywordNatures)
   .use(adminConfigs)
   .use(adminFiles);

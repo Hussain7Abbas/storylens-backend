@@ -3,6 +3,7 @@ import { Elysia, t } from 'elysia';
 import { FilePlain, NovelPlain } from '@/lib/db';
 import { authorize } from '@/middleware/authorize';
 import { adminListQuery, pageArgs } from '@/schemas/admin';
+import { adminKeywordDetailSchema, keywordDetailInclude } from '@/schemas/admin-keywords';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
@@ -145,6 +146,25 @@ export const adminNovels = new Elysia({ prefix: '/novels', tags: ['Admin: Novels
       params: t.Object({ id: t.String() }),
       response: { 200: adminNovelSchema },
       detail: { summary: 'View a novel' },
+    },
+  )
+
+  .get(
+    '/:id/keywords',
+    async ({ prisma, params: { id } }) => {
+      const novel = await prisma.novel.findUnique({ where: { id }, select: { id: true } });
+      if (!novel) notFound();
+      const data = await prisma.keyword.findMany({
+        where: { novelId: id },
+        include: keywordDetailInclude,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      return { data };
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      response: { 200: t.Object({ data: t.Array(adminKeywordDetailSchema) }) },
+      detail: { summary: 'List a novel’s keywords with their versions and aliases' },
     },
   )
 
