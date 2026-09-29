@@ -136,7 +136,7 @@ export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
   'GET /api/user/novels/': 'List novels',
   'GET /api/user/novels/:id': 'View a novel with its chapters',
   'POST /api/user/novels/': 'Add a novel',
-  'PUT /api/user/novels/:id': 'Update a novel (readers: slugs and an empty context)',
+  'PUT /api/user/novels/:id': 'Update a novel (readers: slugs, an empty context and missing name translations)',
   'PUT /api/user/novels/:id/context': 'Set a novel’s AI context (readers: only while empty)',
   'DELETE /api/user/novels/:id': 'Delete a novel',
   'GET /api/user/chapters/novel/:novelId': 'List a novel’s chapters',

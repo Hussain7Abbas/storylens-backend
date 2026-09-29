@@ -21,7 +21,7 @@ export async function seedKeywords(prisma: PrismaClient) {
     throw new Error('No keyword natures found');
   }
 
-  const novelByName = indexBy(novels, (novel) => novel.name);
+  const novelByName = indexBy(novels, (novel) => novel.nameAr ?? novel.nameEn ?? "");
   const categoryByName = indexBy(keywordCategories, (category) => category.nameAr ?? category.nameEn ?? "");
   const natureByName = indexBy(keywordNatures, (nature) => nature.nameAr ?? nature.nameEn ?? "");
 
@@ -47,7 +47,7 @@ export async function seedKeywords(prisma: PrismaClient) {
 
       return [
         {
-          name,
+          nameAr: name,
           description: keyword.description,
           novelId: novel.id,
           categoryId: categoryRecord.id,

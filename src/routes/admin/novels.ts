@@ -32,16 +32,20 @@ function toNovel({ _count, ...novel }: NovelRow) {
 }
 
 const novelBody = {
-  name: t.String({ minLength: 1, maxLength: 300 }),
-  description: t.Optional(t.Nullable(t.String({ maxLength: 5000 }))),
+  nameAr: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
+  nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
+  descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 5000 }))),
+  descriptionEn: t.Optional(t.Nullable(t.String({ maxLength: 5000 }))),
   context: t.Optional(t.Nullable(t.String({ maxLength: 20000 }))),
   imageId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
   slugs: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 300 }))),
 };
 
 type NovelBody = {
-  name?: string;
-  description?: string | null;
+  nameAr?: string | null;
+  nameEn?: string | null;
+  descriptionAr?: string | null;
+  descriptionEn?: string | null;
   context?: string | null;
   imageId?: string | null;
   slugs?: string[];
@@ -52,8 +56,10 @@ function novelData(body: NovelBody) {
     value === undefined ? undefined : value === null ? null : sanitize(value) || null;
 
   return {
-    name: body.name === undefined ? undefined : sanitize(body.name),
-    description: optionalText(body.description),
+    nameAr: optionalText(body.nameAr),
+    nameEn: optionalText(body.nameEn),
+    descriptionAr: optionalText(body.descriptionAr),
+    descriptionEn: optionalText(body.descriptionEn),
     context: optionalText(body.context),
     imageId: body.imageId,
     slugs: body.slugs ? [...new Set(body.slugs.map((slug) => sanitize(slug)))] : undefined,
@@ -64,10 +70,26 @@ function notFound(): never {
   throw new HttpError({ statusCode: 404, message: 'Novel not found' });
 }
 
-async function assertNameFree(prisma: Prisma.TransactionClient, name: string, id?: string) {
-  const existing = await prisma.novel.findUnique({ where: { name }, select: { id: true } });
-  if (existing && existing.id !== id) {
-    throw new HttpError({ statusCode: 409, message: 'A novel with this name already exists' });
+async function assertNamesFree(
+  prisma: Prisma.TransactionClient,
+  names: { nameAr?: string | null; nameEn?: string | null },
+  id?: string,
+) {
+  for (const [field, name] of [
+    ['nameAr', names.nameAr],
+    ['nameEn', names.nameEn],
+  ] as const) {
+    if (!name) continue;
+    const existing = await prisma.novel.findFirst({ where: { [field]: name }, select: { id: true } });
+    if (existing && existing.id !== id) {
+      throw new HttpError({ statusCode: 409, message: 'A novel with this name already exists' });
+    }
+  }
+}
+
+function assertHasName(names: { nameAr?: string | null; nameEn?: string | null }) {
+  if (!names.nameAr && !names.nameEn) {
+    throw new HttpError({ statusCode: 422, message: 'An Arabic or English name is required' });
   }
 }
 
@@ -82,8 +104,10 @@ export const adminNovels = new Elysia({ prefix: '/novels', tags: ['Admin: Novels
       const where: Prisma.NovelWhereInput = search
         ? {
             OR: [
-              { name: { contains: search, mode: 'insensitive' } },
-              { description: { contains: search, mode: 'insensitive' } },
+              { nameAr: { contains: search, mode: 'insensitive' } },
+              { nameEn: { contains: search, mode: 'insensitive' } },
+              { descriptionAr: { contains: search, mode: 'insensitive' } },
+              { descriptionEn: { contains: search, mode: 'insensitive' } },
               { slugs: { has: search } },
             ],
           }
@@ -93,7 +117,7 @@ export const adminNovels = new Elysia({ prefix: '/novels', tags: ['Admin: Novels
         prisma.novel.findMany({
           where,
           include: novelInclude,
-          orderBy: query.sort === 'name' ? { name: 'asc' } : { createdAt: 'desc' },
+          orderBy: query.sort === 'name' ? [{ nameAr: 'asc' }, { nameEn: 'asc' }] : { createdAt: 'desc' },
           ...pageArgs(query),
         }),
         prisma.novel.count({ where }),
@@ -128,9 +152,10 @@ export const adminNovels = new Elysia({ prefix: '/novels', tags: ['Admin: Novels
     '/',
     async ({ prisma, authedUser, body }) => {
       const data = novelData(body);
-      await assertNameFree(prisma, data.name ?? '');
+      assertHasName(data);
+      await assertNamesFree(prisma, data);
       const novel = await prisma.novel.create({
-        data: { ...data, name: data.name ?? '', slugs: data.slugs ?? [], createdById: authedUser.id },
+        data: { ...data, slugs: data.slugs ?? [], createdById: authedUser.id },
         include: novelInclude,
       });
       return toNovel(novel);
@@ -145,11 +170,18 @@ export const adminNovels = new Elysia({ prefix: '/novels', tags: ['Admin: Novels
   .put(
     '/:id',
     async ({ prisma, params: { id }, body }) => {
-      const existing = await prisma.novel.findUnique({ where: { id }, select: { id: true } });
+      const existing = await prisma.novel.findUnique({
+        where: { id },
+        select: { id: true, nameAr: true, nameEn: true },
+      });
       if (!existing) notFound();
 
       const data = novelData(body);
-      if (data.name) await assertNameFree(prisma, data.name, id);
+      assertHasName({
+        nameAr: data.nameAr === undefined ? existing.nameAr : data.nameAr,
+        nameEn: data.nameEn === undefined ? existing.nameEn : data.nameEn,
+      });
+      await assertNamesFree(prisma, data, id);
       const novel = await prisma.novel.update({ where: { id }, data, include: novelInclude });
       return toNovel(novel);
     },

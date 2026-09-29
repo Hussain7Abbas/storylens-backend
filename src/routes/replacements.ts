@@ -353,7 +353,7 @@ async function checkChainReplacement(
 ) {
   const keyword = await prisma.keyword.findFirst({
     where: {
-      name: body.to,
+      OR: [{ nameAr: body.to }, { nameEn: body.to }],
       novelId: body.novelId,
     },
   });

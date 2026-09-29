@@ -6,9 +6,9 @@ export async function seedNovels(prisma: PrismaClient) {
 
   await prisma.novel.createMany({
     data: seedNovelsData.map((novel) => ({
-      name: novel.name,
+      nameAr: novel.name,
       slugs: novel.slugs,
-      description: `Last modified: ${novel.lastModified}`,
+      descriptionAr: `Last modified: ${novel.lastModified}`,
     })),
   });
 }

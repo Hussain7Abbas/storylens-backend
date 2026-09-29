@@ -5,7 +5,7 @@ const PRIMARY_WEIGHT = 2;
 const SECONDARY_WEIGHT = 1;
 
 const SORT_COLUMNS: Record<string, Set<string>> = {
-  Keyword: new Set(['name', 'description', 'createdAt', 'updatedAt']),
+  Keyword: new Set(['nameAr', 'nameEn', 'createdAt', 'updatedAt']),
   Replacement: new Set(['from', 'to', 'createdAt', 'updatedAt']),
 };
 
@@ -15,6 +15,8 @@ interface WeightedSearchFilters {
   natureId?: string;
   keywordId?: string;
   type?: string;
+  /** Only rows where this column is set (e.g. the reader's language field). */
+  notNullColumn?: string;
 }
 
 interface WeightedSearchParams {
@@ -71,6 +73,10 @@ export async function queryWeightedSearchIds(
 
   if (params.filters.keywordId) {
     filterSql.push(Prisma.sql`"keywordId" = ${params.filters.keywordId}`);
+  }
+
+  if (params.filters.notNullColumn) {
+    filterSql.push(Prisma.sql`${Prisma.raw(`"${params.filters.notNullColumn}"`)} IS NOT NULL`);
   }
 
   if (params.filters.type) {

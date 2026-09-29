@@ -2,6 +2,7 @@ import { Elysia } from 'elysia';
 import { adminAuth } from './auth';
 import { adminConfigs } from './configs';
 import { adminFiles } from './files';
+import { adminKeywords } from './keywords';
 import { adminNovels } from './novels';
 import { adminPermissions } from './permissions';
 import { adminRoles } from './roles';
@@ -16,5 +17,6 @@ export const adminApi = new Elysia({ prefix: '/api/admin' })
   .use(adminRoles)
   .use(adminPermissions)
   .use(adminNovels)
+  .use(adminKeywords)
   .use(adminConfigs)
   .use(adminFiles);

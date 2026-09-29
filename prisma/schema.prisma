@@ -197,8 +197,11 @@ model File {
 model Novel {
   id String @id @default(uuid())
 
-  name String @unique
-  description String?
+  // Translated fields: each language has its own column; readers only see their language's.
+  nameAr        String? @unique
+  nameEn        String? @unique
+  descriptionAr String?
+  descriptionEn String?
   // Setting, premise, tone and main cast summary that AI prompts use as the novel's global context.
   context String? @db.Text
   slugs String[] @default([])
@@ -278,7 +281,9 @@ model KeywordNature {
 
 model Keyword {
   id           String       @id @default(uuid())
-  name         String
+  // Translated names matched on pages in that language; at least one is set.
+  nameAr       String?
+  nameEn       String?
   matchingType MatchingType @default(FULL)
 
   novelId String
@@ -297,8 +302,10 @@ model Keyword {
   KeywordsChapters KeywordsChapters[] @relation("KeywordsChapters")
   replacements     Replacement[]      @relation("KeywordReplacements")
 
-  @@unique([name, novelId])
-  @@index([name])
+  @@unique([nameAr, novelId])
+  @@unique([nameEn, novelId])
+  @@index([nameAr])
+  @@index([nameEn])
 }
 
 model KeywordAlias {

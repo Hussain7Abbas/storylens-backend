@@ -2,6 +2,7 @@ import { bearer } from '@elysiajs/bearer';
 import { prisma } from '@/lib/db';
 import { getSessionFromBearerToken, toAuthUser } from '@/lib/auth/session';
 import { Elysia } from 'elysia';
+import { toLanguage } from '@/utils/translation';
 
 export const setup = new Elysia({ name: 'setup' })
 
@@ -13,9 +14,11 @@ export const setup = new Elysia({ name: 'setup' })
 
   // Translation
   .derive({ as: 'scoped' }, ({ headers }) => {
-    const lang = headers['accept-language']?.split(',')[0] || 'en';
+    const lang = toLanguage(headers['accept-language']);
 
     return {
+      // Readers see novel and keyword fields in this language only.
+      lang,
       t: ({ en, ar }: { en: string; ar: string }) => {
         return lang === 'ar' ? ar : en;
       },

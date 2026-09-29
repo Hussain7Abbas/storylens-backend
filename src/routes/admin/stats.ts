@@ -14,7 +14,8 @@ const recentUserSchema = t.Object({
 
 const recentNovelSchema = t.Object({
   id: t.String(),
-  name: t.String(),
+  nameAr: t.Nullable(t.String()),
+  nameEn: t.Nullable(t.String()),
   createdAt: t.Date(),
 });
 
@@ -56,7 +57,7 @@ export const adminStats = new Elysia({ prefix: '/stats', tags: ['Admin: Overview
         prisma.novel.findMany({
           orderBy: { createdAt: 'desc' },
           take: 6,
-          select: { id: true, name: true, createdAt: true },
+          select: { id: true, nameAr: true, nameEn: true, createdAt: true },
         }),
       ]);
 
