@@ -4,8 +4,11 @@ module.exports = {
     {
       name: 'storylens-api',
       cwd: __dirname,
-      script: 'src/main.ts',
-      interpreter: 'bun',
+      // Spawn Bun directly: `interpreter: 'bun'` loads the app through PM2's
+      // require() wrapper, which cannot load main.ts (top-level await).
+      script: 'bun',
+      args: ['src/main.ts'],
+      interpreter: 'none',
       env_file: '.env',
       env: {
         NODE_ENV: 'production',
