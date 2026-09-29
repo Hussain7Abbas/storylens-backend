@@ -48,6 +48,46 @@ export function assertHasName(
   }
 }
 
+const ARABIC_LETTER = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
+const LATIN_LETTER = /[A-Za-zÀ-ɏ]/;
+
+/** The language a name is written in, from its script; null when it has no letters. */
+export function scriptLanguage(text: string): Language | null {
+  if (ARABIC_LETTER.test(text)) return 'ar';
+  if (LATIN_LETTER.test(text)) return 'en';
+  return null;
+}
+
+type AliasNames = { name: string; nameAr?: string | null; nameEn?: string | null };
+
+/**
+ * An alias's name in each language. Aliases added before `nameAr`/`nameEn` existed
+ * (or by clients that only send `name`) have neither, so `name` fills its script's language.
+ */
+export function aliasNames(alias: AliasNames): Record<Language, string | null> {
+  const names: Record<Language, string | null> = { ar: alias.nameAr || null, en: alias.nameEn || null };
+  const language = scriptLanguage(alias.name);
+  if (language && !names[language] && !Object.values(names).includes(alias.name)) names[language] = alias.name;
+  return names;
+}
+
+/**
+ * Language columns for an alias saved with `name`: the name's script column takes it,
+ * and a column that held the previous name (a rename) follows it or is cleared.
+ */
+export function aliasNameColumns(
+  name: string,
+  previous?: AliasNames,
+): { nameAr: string | null; nameEn: string | null } {
+  const names = previous ? aliasNames(previous) : { ar: null, en: null };
+  for (const language of LANGUAGES) {
+    if (previous && names[language] === previous.name) names[language] = null;
+  }
+  const language = scriptLanguage(name);
+  if (language) names[language] = name;
+  return { nameAr: names.ar, nameEn: names.en };
+}
+
 /** Display name for logs, prompts and fallbacks when either translation may be missing. */
 export function anyName(item: { nameAr?: string | null; nameEn?: string | null }): string {
   return item.nameAr ?? item.nameEn ?? '';

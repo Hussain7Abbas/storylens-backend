@@ -41,7 +41,14 @@ export const app = new Elysia()
 			return status(401, { message: error.message });
 		}
 
-		const statusCode = typeof set.status === "number" ? set.status : 500;
+		// `set.status` is not final yet here (an unmatched route still reads 200), so
+		// prefer the status Elysia's own errors carry (404 not found, 422 validation, 400 parse).
+		const errorStatus =
+			error && typeof error === "object" && "status" in error && typeof error.status === "number"
+				? error.status
+				: undefined;
+		const statusCode =
+			errorStatus ?? (typeof set.status === "number" && set.status >= 400 ? set.status : 500);
 		const message = error instanceof Error ? error.message : String(error);
 		const stack = error instanceof Error ? error.stack : undefined;
 
