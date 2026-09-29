@@ -9,6 +9,7 @@ import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
 import { aliasNameColumns, aliasNames, languageSchema, nameField, scriptLanguage } from '@/utils/translation';
 import { assertStyleRefs, styleData } from './keyword-styles';
+import { lockKeywordVersions } from './version-ranges';
 
 type Tx = Prisma.TransactionClient;
 
@@ -51,6 +52,12 @@ function conflict(message: string): never {
   throw new HttpError({ statusCode: 409, message });
 }
 
+function assertSourceHasOnlyBaseVersion(source: { versions: unknown[] }) {
+  if (source.versions.length > 1) {
+    conflict('A keyword with later versions cannot be merged without losing its version history');
+  }
+}
+
 async function loadPair(tx: Tx, id: string, targetId: string) {
   if (id === targetId) conflict('A keyword cannot be merged into itself');
   const [source, target] = await Promise.all([
@@ -64,18 +71,64 @@ async function loadPair(tx: Tx, id: string, targetId: string) {
 
 /**
  * Moves what hangs off `source` (aliases, chapter links, replacements) onto
- * `target`, then deletes `source`. Aliases whose name the target already has are dropped.
+ * `target`, then deletes `source`. Same-name aliases combine compatible translations.
  */
 async function absorb(
   tx: Tx,
-  source: { id: string; aliases: { id: string; name: string }[] },
-  target: { id: string; aliases: { name: string; nameAr: string | null; nameEn: string | null }[] },
+  source: { id: string; aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[] },
+  target: { id: string; aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[] },
 ) {
-  const taken = new Set(target.aliases.flatMap((alias) => [alias.name, ...Object.values(aliasNames(alias))]));
+  const byName = new Map(target.aliases.map((alias) => [alias.name, alias]));
+  const represented = new Set(target.aliases.flatMap((alias) => [alias.name, ...Object.values(aliasNames(alias))]));
   for (const alias of source.aliases) {
-    if (taken.has(alias.name)) continue;
-    await tx.keywordAlias.update({ where: { id: alias.id }, data: { keywordId: target.id } });
-    taken.add(alias.name);
+    const existing = byName.get(alias.name);
+    if (!existing) {
+      const distinctName = represented.has(alias.name)
+        ? Object.values(aliasNames(alias)).find((name) => name && !represented.has(name))
+        : alias.name;
+      if (!distinctName) continue;
+      const renamed = distinctName !== alias.name;
+      const columns = renamed ? aliasNameColumns(distinctName) : { nameAr: alias.nameAr, nameEn: alias.nameEn };
+      await tx.keywordAlias.update({
+        where: { id: alias.id },
+        data: { keywordId: target.id, ...(renamed ? { name: distinctName, ...columns } : {}) },
+      });
+      byName.set(distinctName, { ...alias, name: distinctName, ...columns });
+      represented.add(distinctName);
+      if (!renamed) Object.values(aliasNames(alias)).forEach((name) => name && represented.add(name));
+      continue;
+    }
+    const incomingNames = aliasNames(alias);
+    const existingNames = aliasNames(existing);
+    const conflictingNames = (['ar', 'en'] as const).flatMap((language) =>
+      incomingNames[language] && existingNames[language] && incomingNames[language] !== existingNames[language]
+        ? [incomingNames[language]]
+        : [],
+    );
+    if (conflictingNames.length) {
+      // The primary name is taken, but a distinct translation can become the
+      // moved alias's primary name without losing either translation.
+      const distinctName = conflictingNames.find((name) => name && !represented.has(name));
+      if (distinctName) {
+        const columns = aliasNameColumns(distinctName);
+        await tx.keywordAlias.update({
+          where: { id: alias.id },
+          data: { keywordId: target.id, name: distinctName, ...columns },
+        });
+        byName.set(distinctName, { ...alias, name: distinctName, ...columns });
+        represented.add(distinctName);
+      }
+      continue;
+    }
+    const nameAr = existingNames.ar ?? incomingNames.ar;
+    const nameEn = existingNames.en ?? incomingNames.en;
+    if (nameAr !== existing.nameAr || nameEn !== existing.nameEn) {
+      await tx.keywordAlias.update({ where: { id: existing.id }, data: { nameAr, nameEn } });
+      existing.nameAr = nameAr;
+      existing.nameEn = nameEn;
+      if (nameAr) represented.add(nameAr);
+      if (nameEn) represented.add(nameEn);
+    }
   }
   await tx.keywordsChapters.updateMany({ where: { keywordId: source.id }, data: { keywordId: target.id } });
   await tx.replacement.updateMany({ where: { keywordId: source.id }, data: { keywordId: target.id } });
@@ -89,7 +142,7 @@ async function addNamesAsAliases(
     id: string;
     nameAr: string | null;
     nameEn: string | null;
-    aliases: { name: string; nameAr: string | null; nameEn: string | null }[];
+    aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[];
   },
   source: {
     nameAr: string | null;
@@ -105,7 +158,7 @@ async function addNamesAsAliases(
   const base = source.versions[0];
   for (const name of [source.nameAr, source.nameEn]) {
     if (!name || taken.has(name)) continue;
-    await tx.keywordAlias.create({
+    const alias = await tx.keywordAlias.create({
       data: {
         keywordId: target.id,
         name,
@@ -116,6 +169,7 @@ async function addNamesAsAliases(
         imageId: base?.imageId ?? null,
       },
     });
+    target.aliases.push(alias);
     taken.add(name);
   }
 }
@@ -336,6 +390,9 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
     '/:id/link-alias',
     async ({ prisma, params: { id }, body }) => {
       const keyword = await prisma.$transaction(async (tx) => {
+        // Serialize links to one alias before reading its names. Otherwise two
+        // requests can both see an empty translation and the later one wins.
+        await tx.$queryRaw`SELECT id FROM "KeywordAlias" WHERE id = ${body.aliasId} FOR UPDATE`;
         const [source, alias] = await Promise.all([
           tx.keyword.findUnique({
             where: { id },
@@ -350,6 +407,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         if (!alias) throw new HttpError({ statusCode: 404, message: 'Alias not found' });
         if (alias.keywordId === source.id) conflict('A keyword cannot be linked to its own alias');
         if (alias.keyword.novelId !== source.novelId) conflict('Both keywords must belong to the same novel');
+        assertSourceHasOnlyBaseVersion(source);
         const name = source.nameAr ?? source.nameEn;
         if (!name || (source.nameAr && source.nameEn)) {
           conflict('Only a keyword named in one language can be linked to an alias');
@@ -419,16 +477,31 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
     async ({ prisma, params: { id }, body }) => {
       const keyword = await prisma.$transaction(async (tx) => {
         const { source, target } = await loadPair(tx, id, body.targetId);
+        await lockKeywordVersions(tx, target.id);
+        const targetVersions = await tx.keywordVersion.findMany({
+          where: { keywordId: target.id },
+          orderBy: { startingChapter: 'asc' },
+        });
         const base = source.versions[0];
-        const lastStart = Math.max(0, ...target.versions.map((version) => version.startingChapter));
+        const latest = targetVersions.at(-1);
+        const lastStart = latest?.startingChapter ?? -1;
         const startingChapter = body.startingChapter ?? lastStart + 1;
-        if (target.versions.some((version) => version.startingChapter === startingChapter)) {
+        if (targetVersions.some((version) => version.startingChapter === startingChapter)) {
           conflict(`The target already has a version starting at chapter ${startingChapter}`);
+        }
+        const previous = targetVersions.filter((version) => version.startingChapter < startingChapter).at(-1);
+        const next = targetVersions.find((version) => version.startingChapter > startingChapter);
+        if (previous && (previous.endingChapter === null || previous.endingChapter >= startingChapter)) {
+          await tx.keywordVersion.update({
+            where: { id: previous.id },
+            data: { endingChapter: startingChapter - 1 },
+          });
         }
         await tx.keywordVersion.create({
           data: {
             keywordId: target.id,
             startingChapter,
+            endingChapter: next ? next.startingChapter - 1 : null,
             description: base?.description ?? null,
             categoryId: base?.categoryId ?? null,
             natureId: base?.natureId ?? null,

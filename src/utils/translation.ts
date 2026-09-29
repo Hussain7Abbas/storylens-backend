@@ -48,8 +48,8 @@ export function assertHasName(
   }
 }
 
-const ARABIC_LETTER = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
-const LATIN_LETTER = /[A-Za-zÀ-ɏ]/;
+const ARABIC_LETTER = /(?=\p{L})\p{Script=Arabic}/u;
+const LATIN_LETTER = /(?=\p{L})\p{Script=Latin}/u;
 
 /** The language a name is written in, from its script; null when it has no letters. */
 export function scriptLanguage(text: string): Language | null {

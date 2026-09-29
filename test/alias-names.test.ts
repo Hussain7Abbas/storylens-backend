@@ -7,6 +7,8 @@ describe('scriptLanguage', () => {
     expect(scriptLanguage('Mira')).toBe('en');
     expect(scriptLanguage('Ling’er 2')).toBe('en');
     expect(scriptLanguage('123')).toBeNull();
+    expect(scriptLanguage('١٢٣')).toBeNull();
+    expect(scriptLanguage('Ali ْ')).toBe('en');
   });
 });
 

@@ -4,6 +4,7 @@ import { adminVersionSchema, styleBody, styleInclude } from '@/schemas/admin-key
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { assertStyleRefs, styleData } from './keyword-styles';
+import { lockKeywordVersions, versionEditNeighbors } from './version-ranges';
 
 function notFound(what: 'Version' | 'Keyword'): never {
   throw new HttpError({ statusCode: 404, message: `${what} not found` });
@@ -29,20 +30,20 @@ export const adminKeywordVersions = new Elysia({ prefix: '/keyword-versions', ta
   .post(
     '/',
     async ({ prisma, authedUser, body }) => {
-      const keyword = await prisma.keyword.findUnique({
-        where: { id: body.keywordId },
-        include: { versions: { orderBy: { startingChapter: 'desc' } } },
-      });
-      if (!keyword) notFound('Keyword');
       await assertStyleRefs(prisma, body);
       const { startingChapter } = body;
       assertRange(startingChapter, body.endingChapter);
-      const latest = keyword.versions[0];
-      if (latest && startingChapter <= latest.startingChapter) {
-        invalid(`A new version must start after chapter ${latest.startingChapter}, where the latest version starts`);
-      }
-
       return prisma.$transaction(async (tx) => {
+        await lockKeywordVersions(tx, body.keywordId);
+        const keyword = await tx.keyword.findUnique({
+          where: { id: body.keywordId },
+          include: { versions: { orderBy: { startingChapter: 'desc' } } },
+        });
+        if (!keyword) notFound('Keyword');
+        const latest = keyword.versions[0];
+        if (latest && startingChapter <= latest.startingChapter) {
+          invalid(`A new version must start after chapter ${latest.startingChapter}, where the latest version starts`);
+        }
         if (latest && (latest.endingChapter === null || latest.endingChapter >= startingChapter)) {
           await tx.keywordVersion.update({ where: { id: latest.id }, data: { endingChapter: startingChapter - 1 } });
         }
@@ -73,22 +74,32 @@ export const adminKeywordVersions = new Elysia({ prefix: '/keyword-versions', ta
   .put(
     '/:id',
     async ({ prisma, params: { id }, body }) => {
-      const existing = await prisma.keywordVersion.findUnique({ where: { id } });
-      if (!existing) notFound('Version');
       await assertStyleRefs(prisma, body);
-      const startingChapter = body.startingChapter ?? existing.startingChapter;
-      assertRange(startingChapter, body.endingChapter === undefined ? existing.endingChapter : body.endingChapter);
-      if (startingChapter !== existing.startingChapter) {
-        const taken = await prisma.keywordVersion.findFirst({
-          where: { keywordId: existing.keywordId, startingChapter, id: { not: id } },
-          select: { id: true },
+      const initial = await prisma.keywordVersion.findUnique({ where: { id }, select: { keywordId: true } });
+      if (!initial) notFound('Version');
+      return prisma.$transaction(async (tx) => {
+        await lockKeywordVersions(tx, initial.keywordId);
+        const versions = await tx.keywordVersion.findMany({
+          where: { keywordId: initial.keywordId },
+          orderBy: { startingChapter: 'asc' },
         });
-        if (taken) invalid(`Another version already starts at chapter ${startingChapter}`);
-      }
-      return prisma.keywordVersion.update({
-        where: { id },
-        data: { ...styleData(body), startingChapter: body.startingChapter, endingChapter: body.endingChapter },
-        include: styleInclude,
+        const existing = versions.find((version) => version.id === id);
+        if (!existing) notFound('Version');
+        const startingChapter = body.startingChapter ?? existing.startingChapter;
+        const endingChapter = body.endingChapter === undefined ? existing.endingChapter : body.endingChapter;
+        const { previous, endingChapter: boundedEnd } = versionEditNeighbors(versions, id, startingChapter, endingChapter);
+        if (previous && startingChapter !== existing.startingChapter) {
+          await tx.keywordVersion.update({ where: { id: previous.id }, data: { endingChapter: startingChapter - 1 } });
+        }
+        return tx.keywordVersion.update({
+          where: { id },
+          data: {
+            ...styleData(body),
+            startingChapter: body.startingChapter,
+            endingChapter: boundedEnd === existing.endingChapter && body.endingChapter === undefined ? undefined : boundedEnd,
+          },
+          include: styleInclude,
+        });
       });
     },
     {
@@ -107,16 +118,28 @@ export const adminKeywordVersions = new Elysia({ prefix: '/keyword-versions', ta
   .delete(
     '/:id',
     async ({ prisma, params: { id } }) => {
-      const existing = await prisma.keywordVersion.findUnique({ where: { id }, include: styleInclude });
-      if (!existing) notFound('Version');
-      const base = await prisma.keywordVersion.findFirst({
-        where: { keywordId: existing.keywordId },
-        orderBy: { startingChapter: 'asc' },
-        select: { id: true },
+      const initial = await prisma.keywordVersion.findUnique({ where: { id }, select: { keywordId: true } });
+      if (!initial) notFound('Version');
+      return prisma.$transaction(async (tx) => {
+        await lockKeywordVersions(tx, initial.keywordId);
+        const versions = await tx.keywordVersion.findMany({
+          where: { keywordId: initial.keywordId },
+          orderBy: { startingChapter: 'asc' },
+        });
+        const index = versions.findIndex((version) => version.id === id);
+        if (index < 0) notFound('Version');
+        if (index === 0) invalid('The base version of a keyword cannot be deleted');
+        const previous = versions[index - 1];
+        const next = versions[index + 1];
+        const existing = await tx.keywordVersion.delete({ where: { id }, include: styleInclude });
+        if (previous) {
+          await tx.keywordVersion.update({
+            where: { id: previous.id },
+            data: { endingChapter: next ? next.startingChapter - 1 : null },
+          });
+        }
+        return existing;
       });
-      if (base?.id === id) invalid('The base version of a keyword cannot be deleted');
-      await prisma.keywordVersion.delete({ where: { id } });
-      return existing;
     },
     {
       params: t.Object({ id: t.String({ format: 'uuid' }) }),
