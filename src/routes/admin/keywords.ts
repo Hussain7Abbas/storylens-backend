@@ -133,6 +133,8 @@ async function addNamesAsAliases(
   source: {
     nameAr: string | null;
     nameEn: string | null;
+    matchingType: 'FULL' | 'PARTIAL';
+    fuzzyMatchArabicCharacters: boolean;
     versions: { description: string | null; categoryId: string | null; natureId: string | null; imageId: string | null }[];
   },
 ) {
@@ -148,6 +150,8 @@ async function addNamesAsAliases(
     data: {
       keywordId: target.id,
       ...names,
+      matchingType: source.matchingType,
+      fuzzyMatchArabicCharacters: source.fuzzyMatchArabicCharacters,
       description: base?.description ?? null,
       categoryId: base?.categoryId ?? null,
       natureId: base?.natureId ?? null,
@@ -256,6 +260,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         data: {
           ...names,
           matchingType: body.matchingType ?? 'FULL',
+          fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
           novelId: novel.id,
           createdById: authedUser.id,
           versions: { create: { ...styleData(body), startingChapter: 0, createdById: authedUser.id } },
@@ -269,6 +274,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         nameAr: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         matchingType: t.Optional(MatchingType),
+        fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
         ...styleBody,
       }),
       response: { 200: adminKeywordDetailSchema },
@@ -302,7 +308,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
 
       const keyword = await prisma.keyword.update({
         where: { id },
-        data: { ...names, matchingType: body.matchingType },
+        data: { ...names, matchingType: body.matchingType, fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters },
         include: keywordInclude,
       });
       return toKeyword(keyword);
@@ -313,6 +319,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         nameAr: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         matchingType: t.Optional(MatchingType),
+        fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
       }),
       response: { 200: adminKeywordSchema },
       detail: { summary: 'Set a keyword’s Arabic and English names and matching' },

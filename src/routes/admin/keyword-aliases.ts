@@ -49,6 +49,7 @@ const aliasFields = {
   nameAr: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
   nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
   matchingType: t.Optional(MatchingType),
+  fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
   overrideStyle: t.Optional(t.Boolean()),
 };
 
@@ -70,6 +71,7 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
           ...styleData(body),
           ...names,
           matchingType: body.matchingType ?? 'FULL',
+          fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
           overrideStyle: body.overrideStyle ?? false,
           keywordId: keyword.id,
           createdById: authedUser.id,
@@ -112,6 +114,7 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
           ...styleData(body),
           ...names,
           matchingType: body.matchingType,
+          fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters,
           overrideStyle: body.overrideStyle,
         },
         include: styleInclude,

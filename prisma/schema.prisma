@@ -285,6 +285,7 @@ model Keyword {
   nameAr       String?
   nameEn       String?
   matchingType MatchingType @default(FULL)
+  fuzzyMatchArabicCharacters Boolean @default(true)
 
   novelId String
   novel   Novel  @relation(fields: [novelId], references: [id], name: "NovelKeywords", onDelete: Cascade)
@@ -315,6 +316,7 @@ model KeywordAlias {
   nameEn        String?
   description   String?
   matchingType  MatchingType @default(FULL)
+  fuzzyMatchArabicCharacters Boolean @default(true)
   overrideStyle Boolean      @default(false)
 
   categoryId String?
