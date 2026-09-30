@@ -1,3 +1,4 @@
+import type { PrismaClient } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { MatchingType } from '@/lib/db';
 import { authorize } from '@/middleware/authorize';
@@ -5,7 +6,6 @@ import { adminAliasSchema, styleBody, styleInclude } from '@/schemas/admin-keywo
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
-import { aliasNameColumns } from '@/utils/translation';
 import { assertStyleRefs, styleData } from './keyword-styles';
 
 function notFound(what: 'Alias' | 'Keyword'): never {
@@ -13,17 +13,35 @@ function notFound(what: 'Alias' | 'Keyword'): never {
 }
 
 function nameTaken(): never {
-  throw new HttpError({ statusCode: 409, message: 'This keyword already has an alias with that name' });
+  throw new HttpError({ statusCode: 409, code: 'ALIAS_NAME_TAKEN', message: 'This keyword already has an alias with that name' });
 }
 
-/** Explicit language names; otherwise they follow `name` by its script. `null` clears one. */
-function languageNames(
-  body: { nameAr?: string | null; nameEn?: string | null },
-  derived: { nameAr: string | null; nameEn: string | null },
+function nameRequired(): never {
+  throw new HttpError({ statusCode: 422, code: 'NAME_REQUIRED', message: 'An Arabic or English name is required' });
+}
+
+/** A sent name, trimmed; blank or `null` clears it, `undefined` keeps it. */
+function cleanName(value: string | null | undefined): string | null | undefined {
+  return value === undefined ? undefined : value === null ? null : sanitize(value) || null;
+}
+
+/** Alias names are unique per keyword in each language. */
+async function assertNamesFree(
+  prisma: PrismaClient,
+  keywordId: string,
+  names: { nameAr?: string | null; nameEn?: string | null },
+  exceptId?: string,
 ) {
-  const pick = (value: string | null | undefined, fallback: string | null) =>
-    value === undefined ? fallback : value === null ? null : sanitize(value) || null;
-  return { nameAr: pick(body.nameAr, derived.nameAr), nameEn: pick(body.nameEn, derived.nameEn) };
+  const filters = [
+    ...(names.nameAr ? [{ nameAr: names.nameAr }] : []),
+    ...(names.nameEn ? [{ nameEn: names.nameEn }] : []),
+  ];
+  if (!filters.length) return;
+  const taken = await prisma.keywordAlias.findFirst({
+    where: { keywordId, OR: filters, ...(exceptId ? { id: { not: exceptId } } : {}) },
+    select: { id: true },
+  });
+  if (taken) nameTaken();
 }
 
 const aliasFields = {
@@ -41,17 +59,16 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
   .post(
     '/',
     async ({ prisma, authedUser, body }) => {
-      const name = sanitize(body.name);
+      const names = { nameAr: cleanName(body.nameAr) ?? null, nameEn: cleanName(body.nameEn) ?? null };
+      if (!names.nameAr && !names.nameEn) nameRequired();
       const keyword = await prisma.keyword.findUnique({ where: { id: body.keywordId }, select: { id: true } });
       if (!keyword) notFound('Keyword');
       await assertStyleRefs(prisma, body);
-      const taken = await prisma.keywordAlias.findFirst({ where: { keywordId: keyword.id, name }, select: { id: true } });
-      if (taken) nameTaken();
+      await assertNamesFree(prisma, keyword.id, names);
       return prisma.keywordAlias.create({
         data: {
           ...styleData(body),
-          name,
-          ...languageNames(body, aliasNameColumns(name)),
+          ...names,
           matchingType: body.matchingType ?? 'FULL',
           overrideStyle: body.overrideStyle ?? false,
           keywordId: keyword.id,
@@ -63,7 +80,6 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
     {
       body: t.Object({
         keywordId: t.String({ format: 'uuid' }),
-        name: t.String({ minLength: 1, maxLength: 300 }),
         ...aliasFields,
       }),
       response: { 200: adminAliasSchema },
@@ -77,25 +93,24 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
       const existing = await prisma.keywordAlias.findUnique({ where: { id } });
       if (!existing) notFound('Alias');
       await assertStyleRefs(prisma, body);
-      const name = body.name === undefined ? undefined : sanitize(body.name);
-      if (name && name !== existing.name) {
-        const taken = await prisma.keywordAlias.findFirst({
-          where: { keywordId: existing.keywordId, name, id: { not: id } },
-          select: { id: true },
-        });
-        if (taken) nameTaken();
-      }
+      const names = { nameAr: cleanName(body.nameAr), nameEn: cleanName(body.nameEn) };
+      const nameAr = names.nameAr === undefined ? existing.nameAr : names.nameAr;
+      const nameEn = names.nameEn === undefined ? existing.nameEn : names.nameEn;
+      if (!nameAr && !nameEn) nameRequired();
+      await assertNamesFree(
+        prisma,
+        existing.keywordId,
+        {
+          nameAr: nameAr !== existing.nameAr ? nameAr : undefined,
+          nameEn: nameEn !== existing.nameEn ? nameEn : undefined,
+        },
+        id,
+      );
       return prisma.keywordAlias.update({
         where: { id },
         data: {
           ...styleData(body),
-          name,
-          ...languageNames(
-            body,
-            name && name !== existing.name
-              ? aliasNameColumns(name, existing)
-              : { nameAr: existing.nameAr, nameEn: existing.nameEn },
-          ),
+          ...names,
           matchingType: body.matchingType,
           overrideStyle: body.overrideStyle,
         },
@@ -104,7 +119,7 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
     },
     {
       params: t.Object({ id: t.String({ format: 'uuid' }) }),
-      body: t.Object({ name: t.Optional(t.String({ minLength: 1, maxLength: 300 })), ...aliasFields }),
+      body: t.Object(aliasFields),
       response: { 200: adminAliasSchema },
       detail: { summary: 'Update a keyword alias' },
     },

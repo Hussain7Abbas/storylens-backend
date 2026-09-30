@@ -9,6 +9,7 @@ import {
   startDetachedSync,
 } from '@/lib/review-version';
 import { deleteFile } from '@/lib/storage';
+import { pruneFeed } from '@/lib/sync/feed';
 
 const storageCleaner = elysiaCron({
   name: 'storage-cleaner',
@@ -59,4 +60,21 @@ const reviewVersionWatcher = elysiaCron({
   },
 });
 
-export const crons = new Elysia({ name: 'crons' }).use(storageCleaner).use(reviewVersionWatcher);
+// Delta-sync feed rows older than the retention window; older cursors get 410 and pull in full.
+const syncFeedPruner = elysiaCron({
+  name: 'sync-feed-pruner',
+  pattern: '30 3 * * *',
+  run: async () => {
+    try {
+      const pruned = await pruneFeed(prisma);
+      if (pruned) console.log(`Sync feed pruner removed ${pruned} changes`);
+    } catch (error) {
+      console.error('Sync feed pruner failed', error);
+    }
+  },
+});
+
+export const crons = new Elysia({ name: 'crons' })
+  .use(storageCleaner)
+  .use(reviewVersionWatcher)
+  .use(syncFeedPruner);

@@ -16,8 +16,11 @@ export type ClientApp = (typeof CLIENT_APPS)[number];
  * what those releases call, and only after usage logs show they are gone.
  */
 export const MIN_CLIENT_VERSIONS: Record<ClientApp, string> = {
-  extension: '3.0.0',
-  desktop: '3.0.0',
+  // The offline-first release changed the synced routes without compatibility
+  // (client IDs, `baseUpdatedAt`, alias `nameAr`/`nameEn`): every release up to
+  // 3.2.1 is refused, and any version the release bump produces is served.
+  extension: '3.2.2',
+  desktop: '3.2.2',
 };
 
 export type ClientVersion = { app: ClientApp; version: string };

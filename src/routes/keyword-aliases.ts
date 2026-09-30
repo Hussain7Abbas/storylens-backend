@@ -1,12 +1,15 @@
+import type { PrismaClient } from "@prisma/client";
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordAliasPlain, KeywordCategoryPlain, KeywordNaturePlain, MatchingType } from "@/lib/db";
-import { assertOwnsResource, authorize } from "@/middleware/authorize";
-import { paginationSchema, sortingSchema } from "@/schemas/common";
+import { assertNotStale } from "@/lib/sync/precondition";
+import { createWithReplay, findReplay } from "@/lib/sync/replay";
+import { assertOwnsAnyOf, authorize } from "@/middleware/authorize";
+import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
 import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
 import { sanitizeObject } from "@/utils/sanitize";
-import { aliasNameColumns } from "@/utils/translation";
+import { assertHasName, translatedNameBody } from "@/utils/translation";
 
 const aliasInclude = { category: true, nature: true, image: true } as const;
 
@@ -16,6 +19,35 @@ const aliasWithStyleShape = t.Object({
 	nature: t.Nullable(KeywordNaturePlain),
 	image: t.Nullable(FilePlain),
 });
+
+type Translate = (messages: { en: string; ar: string }) => string;
+
+function cleanName(value: string | null | undefined): string | null | undefined {
+	return value === undefined || value === null ? value : value.trim() || null;
+}
+
+function aliasNotFound(t: Translate): HttpError {
+	return new HttpError({ statusCode: 404, code: "NOT_FOUND", message: t({ en: "Alias not found", ar: "الاسم المستعار غير موجود" }) });
+}
+
+/** Alias names are unique per keyword in each language; `exceptId` is the row being saved. */
+async function assertAliasNamesFree(
+	prisma: PrismaClient,
+	t: Translate,
+	keywordId: string,
+	names: ({ nameAr: string } | { nameEn: string })[],
+	exceptId: string,
+): Promise<void> {
+	if (!names.length) return;
+	const conflict = await prisma.keywordAlias.findFirst({ where: { keywordId, id: { not: exceptId }, OR: names } });
+	if (conflict) {
+		throw new HttpError({
+			statusCode: 409,
+			code: "ALIAS_NAME_TAKEN",
+			message: t({ en: "Alias name already exists for this keyword", ar: "اسم الاسم المستعار موجود بالفعل لهذه الكلمة المفتاحية" }),
+		});
+	}
+}
 
 export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["Keywords"] })
 	.use(setup)
@@ -61,48 +93,61 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 		},
 	)
 
-
+	// Any reader may add an alias to any keyword. The client sends the alias ID, so a
+	// replay (a lost response sent again) returns the same row.
 	.post(
 		"/",
 		async ({ t, prisma, body, authedUser }) => {
+			const findAlias = () => prisma.keywordAlias.findUnique({ where: { id: body.id }, include: aliasInclude });
+			const isReplay = (row: { createdById: string | null; keywordId: string }) =>
+				row.createdById === authedUser.id && row.keywordId === body.keywordId;
+
+			const replay = await findReplay(findAlias, isReplay, t);
+			if (replay) return replay;
+
+			assertHasName(body, t);
 			const sanitizedBody = sanitizeObject(body);
-			const { keywordId, name } = sanitizedBody;
+			const { keywordId } = sanitizedBody;
+			const names = { nameAr: cleanName(body.nameAr) ?? null, nameEn: cleanName(body.nameEn) ?? null };
 
 			const keyword = await prisma.keyword.findUnique({ where: { id: keywordId } });
 			if (!keyword) {
-				throw new HttpError({ statusCode: 404, message: t({ en: "Keyword not found", ar: "الكلمة المفتاحية غير موجودة" }) });
+				throw new HttpError({ statusCode: 404, code: "PARENT_NOT_FOUND", message: t({ en: "Keyword not found", ar: "الكلمة المفتاحية غير موجودة" }) });
 			}
 
-			const existing = await prisma.keywordAlias.findFirst({ where: { keywordId, name } });
-			if (existing) {
-				throw new HttpError({
-					message: t({ en: "Alias name already exists for this keyword", ar: "اسم الاسم المستعار موجود بالفعل لهذه الكلمة المفتاحية" }),
-				});
-			}
+			await assertAliasNamesFree(prisma, t, keywordId, [
+				...(names.nameAr ? [{ nameAr: names.nameAr }] : []),
+				...(names.nameEn ? [{ nameEn: names.nameEn }] : []),
+			], body.id);
 
-			const alias = await prisma.keywordAlias.create({
-				data: {
-					name,
-					...aliasNameColumns(name),
-					description: sanitizedBody.description ?? null,
-					matchingType: sanitizedBody.matchingType ?? "FULL",
-					categoryId: sanitizedBody.categoryId ?? null,
-					natureId: sanitizedBody.natureId ?? null,
-					imageId: sanitizedBody.imageId ?? null,
-					overrideStyle: sanitizedBody.overrideStyle ?? false,
-					keywordId,
-					createdById: authedUser.id,
-				},
-				include: aliasInclude,
-			});
-
-			return alias;
+			return createWithReplay(
+				() =>
+					prisma.keywordAlias.create({
+						data: {
+							id: body.id,
+							...names,
+							description: sanitizedBody.description ?? null,
+							matchingType: sanitizedBody.matchingType ?? "FULL",
+							categoryId: sanitizedBody.categoryId ?? null,
+							natureId: sanitizedBody.natureId ?? null,
+							imageId: sanitizedBody.imageId ?? null,
+							overrideStyle: sanitizedBody.overrideStyle ?? false,
+							keywordId,
+							createdById: authedUser.id,
+						},
+						include: aliasInclude,
+					}),
+				findAlias,
+				isReplay,
+				t,
+			);
 		},
 		{
 			body: t.Object({
+				id: t.String({ format: "uuid" }),
 				keywordId: t.String({ format: "uuid" }),
-				name: t.String({ minLength: 1 }),
-				description: t.Optional(t.String()),
+				...translatedNameBody,
+				description: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
@@ -113,6 +158,8 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 		},
 	)
 
+	// A moderator, the alias's own creator or the parent keyword's creator may edit it.
+	// Partial: only sent fields change; `null` clears the description or image.
 	.put(
 		"/:id",
 		async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -121,32 +168,35 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				include: { keyword: true },
 			});
 
-			if (!existing) {
-				throw new HttpError({ statusCode: 404, message: t({ en: "Alias not found", ar: "الاسم المستعار غير موجود" }) });
-			}
+			if (!existing) throw aliasNotFound(t);
 
-			assertOwnsResource(existing.keyword.createdById, authedUser);
+			assertOwnsAnyOf([existing.createdById, existing.keyword.createdById], authedUser);
+			await assertNotStale(
+				existing,
+				body.baseUpdatedAt,
+				() => prisma.keywordAlias.findUniqueOrThrow({ where: { id }, include: aliasInclude }),
+				t,
+			);
 
 			const sanitizedBody = sanitizeObject(body);
+			const names = { nameAr: cleanName(body.nameAr), nameEn: cleanName(body.nameEn) };
+			assertHasName(
+				{
+					nameAr: names.nameAr === undefined ? existing.nameAr : names.nameAr,
+					nameEn: names.nameEn === undefined ? existing.nameEn : names.nameEn,
+				},
+				t,
+			);
 
-			if (sanitizedBody.name && sanitizedBody.name !== existing.name) {
-				const conflict = await prisma.keywordAlias.findFirst({
-					where: { keywordId: existing.keywordId, name: sanitizedBody.name, id: { not: id } },
-				});
-				if (conflict) {
-					throw new HttpError({
-						message: t({ en: "Alias name already exists for this keyword", ar: "اسم الاسم المستعار موجود بالفعل لهذه الكلمة المفتاحية" }),
-					});
-				}
-			}
+			await assertAliasNamesFree(prisma, t, existing.keywordId, [
+				...(names.nameAr && names.nameAr !== existing.nameAr ? [{ nameAr: names.nameAr }] : []),
+				...(names.nameEn && names.nameEn !== existing.nameEn ? [{ nameEn: names.nameEn }] : []),
+			], id);
 
-			const alias = await prisma.keywordAlias.update({
+			return prisma.keywordAlias.update({
 				where: { id },
 				data: {
-					name: sanitizedBody.name,
-					...(sanitizedBody.name && sanitizedBody.name !== existing.name
-						? aliasNameColumns(sanitizedBody.name, existing)
-						: {}),
+					...names,
 					description: sanitizedBody.description,
 					matchingType: sanitizedBody.matchingType,
 					categoryId: sanitizedBody.categoryId,
@@ -156,24 +206,24 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				},
 				include: aliasInclude,
 			});
-
-			return alias;
 		},
 		{
 			params: t.Object({ id: t.String({ format: "uuid" }) }),
 			body: t.Object({
-				name: t.Optional(t.String({ minLength: 1 })),
-				description: t.Optional(t.String()),
+				baseUpdatedAt: t.String({ format: "date-time" }),
+				...translatedNameBody,
+				description: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				overrideStyle: t.Optional(t.Boolean()),
 			}),
-			response: { 200: aliasWithStyleShape },
+			response: { 200: aliasWithStyleShape, 409: staleWriteSchema(aliasWithStyleShape) },
 		},
 	)
 
+	// Deletes are unconditional (a delete wins over a remote edit).
 	.delete(
 		"/:id",
 		async ({ t, prisma, params: { id }, authedUser }) => {
@@ -182,15 +232,14 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				include: { keyword: true },
 			});
 
-			if (!existing) {
-				throw new HttpError({ statusCode: 404, message: t({ en: "Alias not found", ar: "الاسم المستعار غير موجود" }) });
-			}
+			if (!existing) throw aliasNotFound(t);
 
-			assertOwnsResource(existing.keyword.createdById, authedUser);
+			assertOwnsAnyOf([existing.createdById, existing.keyword.createdById], authedUser);
 
 			await prisma.keywordAlias.delete({ where: { id } });
 
-			return existing;
+			const { keyword: _keyword, ...alias } = existing;
+			return alias;
 		},
 		{
 			params: t.Object({ id: t.String({ format: "uuid" }) }),

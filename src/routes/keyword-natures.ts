@@ -1,6 +1,17 @@
 import { Elysia, t } from 'elysia';
 import { KeywordNaturePlain } from '@/lib/db';
-import { paginationSchema, sortingSchema } from '@/schemas/common';
+import type { PrismaClient } from '@prisma/client';
+import { paginationSchema, sortingSchema, staleWriteSchema } from '@/schemas/common';
+import {
+  assertLookupHasName,
+  cleanLookupName,
+  isLookupReplay,
+  type LookupNames,
+  lookupNameFilters,
+  lookupNameTaken,
+} from '@/lib/sync/lookups';
+import { assertNotStale } from '@/lib/sync/precondition';
+import { createWithReplay, findReplay } from '@/lib/sync/replay';
 import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
@@ -62,6 +73,7 @@ export const keywordNatures = new Elysia({
       if (!nature) {
         throw new HttpError({
           statusCode: 404,
+          code: 'NOT_FOUND',
           message: t({ en: 'Nature not found', ar: 'الطبيعة غير موجودة' }),
         });
       }
@@ -83,123 +95,172 @@ export const keywordNatures = new Elysia({
     },
   )
 
-  // Create keyword nature (moderator by default)
+  // Create keyword nature (moderator by default). The client sends the ID, so a replay
+  // with the same names and color returns the same row.
   .post(
     '/',
     async ({ t, prisma, body }) => {
-      const existingNature = await prisma.keywordNature.findFirst({
-        where: { nameEn: body.nameEn },
-      });
+      const findNature = () => prisma.keywordNature.findUnique({ where: { id: body.id } });
+      const isReplay = (row: NatureRow) => isLookupReplay(row, body);
 
-      if (existingNature) {
-        throw new HttpError({
-          message: t({ en: 'Nature name already exists', ar: 'اسم الطبيعة موجود بالفعل' }),
-        });
-      }
+      const replay = await findReplay(findNature, isReplay, t);
+      if (replay) return replay;
 
-      const nature = await prisma.keywordNature.create({
-        data: {
-          nameEn: body.nameEn,
-          nameAr: body.nameAr,
-          color: body.color,
-          description: body.description,
-        },
-      });
+      const names = { nameAr: cleanLookupName(body.nameAr) ?? null, nameEn: cleanLookupName(body.nameEn) ?? null };
+      assertLookupHasName(names, t);
+      await assertNamesFree(prisma, t, names, body.id);
 
-      return nature;
+      return createWithReplay(
+        () =>
+          prisma.keywordNature.create({
+            data: {
+              id: body.id,
+              ...names,
+              color: body.color,
+              description: body.description,
+            },
+          }),
+        findNature,
+        isReplay,
+        t,
+      );
     },
     {
       body: t.Object({
-        nameEn: t.Optional(t.String()),
-        nameAr: t.Optional(t.String()),
+        id: t.String({ format: 'uuid' }),
+        nameEn: t.Optional(t.Nullable(t.String())),
+        nameAr: t.Optional(t.Nullable(t.String())),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
         description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
-      response: { 200: KeywordNaturePlain },
+      response: {
+        200: KeywordNaturePlain,
+      },
     },
   )
 
-  // Update keyword nature (User only)
+  // Update keyword nature (moderator by default). Partial: only sent fields change.
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body }) => {
-      const existingNature = await prisma.keywordNature.findUnique({ where: { id } });
+      const existing = await prisma.keywordNature.findUnique({ where: { id } });
+      if (!existing) throw notFound(t);
 
-      if (!existingNature) {
-        throw new HttpError({
-          statusCode: 404,
-          message: t({ en: 'Nature not found', ar: 'الطبيعة غير موجودة' }),
-        });
-      }
+      await assertNotStale(existing, body.baseUpdatedAt, () => prisma.keywordNature.findUniqueOrThrow({ where: { id } }), t);
 
-      if (body.nameEn && body.nameEn !== existingNature.nameEn) {
-        const conflictNature = await prisma.keywordNature.findFirst({
-          where: { nameEn: body.nameEn, id: { not: id } },
-        });
+      const names = { nameAr: cleanLookupName(body.nameAr), nameEn: cleanLookupName(body.nameEn) };
+      assertLookupHasName(
+        {
+          nameAr: names.nameAr === undefined ? existing.nameAr : names.nameAr,
+          nameEn: names.nameEn === undefined ? existing.nameEn : names.nameEn,
+        },
+        t,
+      );
+      await assertNamesFree(
+        prisma,
+        t,
+        {
+          nameAr: names.nameAr !== existing.nameAr ? names.nameAr : undefined,
+          nameEn: names.nameEn !== existing.nameEn ? names.nameEn : undefined,
+        },
+        id,
+      );
 
-        if (conflictNature) {
-          throw new HttpError({
-            message: t({ en: 'Nature name already exists', ar: 'اسم الطبيعة موجود بالفعل' }),
-          });
-        }
-      }
-
-      const nature = await prisma.keywordNature.update({
+      return prisma.keywordNature.update({
         where: { id },
         data: {
-          nameEn: body.nameEn,
-          nameAr: body.nameAr,
+          ...names,
           color: body.color,
           description: body.description,
         },
       });
-
-      return nature;
     },
     {
-      params: t.Object({ id: t.String({ format: 'uuid' }) }),
+      params: t.Object({
+        id: t.String({ format: 'uuid' }),
+      }),
       body: t.Object({
-        nameEn: t.Optional(t.String()),
-        nameAr: t.Optional(t.String()),
-        color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
+        baseUpdatedAt: t.String({ format: 'date-time' }),
+        nameEn: t.Optional(t.Nullable(t.String())),
+        nameAr: t.Optional(t.Nullable(t.String())),
+        color: t.Optional(t.String({ pattern: '^#[0-9A-Fa-f]{6}$' })),
         description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
-      response: { 200: KeywordNaturePlain },
+      response: {
+        200: KeywordNaturePlain,
+        409: staleWriteSchema(KeywordNaturePlain),
+      },
     },
   )
 
-  // Delete keyword nature (User only)
+  // Delete keyword nature (moderator by default); refused while a version or alias uses it
   .delete(
     '/:id',
     async ({ t, prisma, params: { id } }) => {
-      const existingNature = await prisma.keywordNature.findUnique({
+      const existing = await prisma.keywordNature.findUnique({
         where: { id },
         include: {
           _count: {
-            select: { keywordVersions: true },
+            select: {
+              keywordVersions: true,
+              keywordAliases: true,
+            },
           },
         },
       });
 
-      if (!existingNature) {
+      if (!existing) throw notFound(t);
+
+      if (existing._count.keywordVersions > 0 || existing._count.keywordAliases > 0) {
         throw new HttpError({
-          statusCode: 404,
-          message: t({ en: 'Nature not found', ar: 'الطبيعة غير موجودة' }),
+          statusCode: 400,
+          code: 'NATURE_IN_USE',
+          message: t({
+            en: 'Cannot delete nature with keywords',
+            ar: 'لا يمكن حذف طبيعة تحتوي على كلمات مفتاحية',
+          }),
         });
       }
 
-      if (existingNature._count.keywordVersions > 0) {
-        throw new HttpError({
-          message: t({ en: 'Cannot delete nature with keywords', ar: 'لا يمكن حذف طبيعة تحتوي على كلمات مفتاحية' }),
-        });
-      }
+      await prisma.keywordNature.delete({
+        where: { id },
+      });
 
-      await prisma.keywordNature.delete({ where: { id } });
-
-      return existingNature;
+      const { _count: _usage, ...nature } = existing;
+      return nature;
     },
     {
-      params: t.Object({ id: t.String({ format: 'uuid' }) }),
-      response: { 200: KeywordNaturePlain },
+      params: t.Object({
+        id: t.String({ format: 'uuid' }),
+      }),
+      response: {
+        200: KeywordNaturePlain,
+      },
     },
   );
+
+type NatureRow = Awaited<ReturnType<PrismaClient['keywordNature']['findUniqueOrThrow']>>;
+type Translate = (messages: { en: string; ar: string }) => string;
+
+function notFound(t: Translate): HttpError {
+  return new HttpError({
+    statusCode: 404,
+    code: 'NOT_FOUND',
+    message: t({ en: 'Nature not found', ar: 'الطبيعة غير موجودة' }),
+  });
+}
+
+/** Names are unique in each language they are given in; `exceptId` is the row being saved. */
+async function assertNamesFree(
+  prisma: PrismaClient,
+  t: Translate,
+  names: LookupNames,
+  exceptId: string,
+): Promise<void> {
+  const filters = lookupNameFilters(names);
+  if (!filters.length) return;
+  const conflict = await prisma.keywordNature.findFirst({ where: { id: { not: exceptId }, OR: filters } });
+  if (conflict) {
+    throw lookupNameTaken(t({ en: 'Nature name already exists', ar: 'اسم الطبيعة موجود بالفعل' }));
+  }
+}

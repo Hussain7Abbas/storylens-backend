@@ -1,14 +1,9 @@
 /**
- * Sanitize a single string input by trimming and removing potentially
- * dangerous HTML/script characters.
+ * Normalize a single string input by trimming it. Stored text is plain: it is
+ * kept exactly as typed (no HTML escaping), and no client may insert it as HTML.
  */
 export function sanitize(input: string): string {
-  return input
-    .trim()
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
+  return input.trim();
 }
 
 /**
