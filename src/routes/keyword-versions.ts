@@ -1,7 +1,9 @@
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordCategoryPlain, KeywordNaturePlain, KeywordVersionPlain } from "@/lib/db";
-import { assertOwnsResource, authorize, canModerate } from "@/middleware/authorize";
-import { paginationSchema, sortingSchema } from "@/schemas/common";
+import { assertNotStale } from "@/lib/sync/precondition";
+import { createWithReplay, findReplay } from "@/lib/sync/replay";
+import { assertOwnsAnyOf, authorize, canModerate } from "@/middleware/authorize";
+import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
 import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
@@ -19,6 +21,16 @@ const versionInclude = {
 	nature: true,
 	image: true,
 } as const;
+
+type Translate = (messages: { en: string; ar: string }) => string;
+
+function parentNotFound(message: string): HttpError {
+	return new HttpError({ statusCode: 404, code: "PARENT_NOT_FOUND", message });
+}
+
+function versionNotFound(t: Translate): HttpError {
+	return new HttpError({ statusCode: 404, code: "NOT_FOUND", message: t({ en: "Version not found", ar: "النسخة غير موجودة" }) });
+}
 
 export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: ["Keywords"] })
 	.use(setup)
@@ -65,9 +77,19 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 	)
 
 
+	// Any reader may add a version to any keyword (readers from their current chapter,
+	// moderators at a chosen range). The client sends the version ID, so a replay
+	// returns the same row without closing the previous version again.
 	.post(
 		"/",
 		async ({ t, prisma, body, authedUser }) => {
+			const findVersion = () => prisma.keywordVersion.findUnique({ where: { id: body.id }, include: versionInclude });
+			const isReplay = (row: { createdById: string | null; keywordId: string }) =>
+				row.createdById === authedUser.id && row.keywordId === body.keywordId;
+
+			const replay = await findReplay(findVersion, isReplay, t);
+			if (replay) return replay;
+
 			const sanitizedBody = sanitizeObject(body);
 			const { keywordId } = sanitizedBody;
 			const categoryId = sanitizedBody.categoryId ?? null;
@@ -79,12 +101,12 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				natureId ? prisma.keywordNature.findUnique({ where: { id: natureId } }) : Promise.resolve(null),
 			]);
 
-			if (!keyword) throw new HttpError({ statusCode: 404, message: t({ en: "Keyword not found", ar: "الكلمة المفتاحية غير موجودة" }) });
-			if (categoryId && !category) throw new HttpError({ statusCode: 404, message: t({ en: "Category not found", ar: "الفئة غير موجودة" }) });
-			if (natureId && !nature) throw new HttpError({ statusCode: 404, message: t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }) });
+			if (!keyword) throw parentNotFound(t({ en: "Keyword not found", ar: "الكلمة المفتاحية غير موجودة" }));
+			if (categoryId && !category) throw parentNotFound(t({ en: "Category not found", ar: "الفئة غير موجودة" }));
+			if (natureId && !nature) throw parentNotFound(t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }));
 
 			const latestVersion = await prisma.keywordVersion.findFirst({
-				where: { keywordId, endingChapter: null },
+				where: { keywordId, endingChapter: null, id: { not: body.id } },
 				orderBy: { startingChapter: "desc" },
 			});
 
@@ -98,6 +120,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				if (sanitizedBody.currentChapter == null) {
 					throw new HttpError({
 						statusCode: 400,
+						code: "VERSION_CHAPTER_REQUIRED",
 						message: t({ en: "currentChapter is required to add a version", ar: "currentChapter مطلوب لإضافة نسخة" }),
 					});
 				}
@@ -107,42 +130,49 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 			if (latestVersion && startingChapter <= latestVersion.startingChapter) {
 				throw new HttpError({
 					statusCode: 400,
+					code: "VERSION_NOT_AFTER_LATEST",
 					message: t({ en: "startingChapter must be greater than the current latest version", ar: "يجب أن يكون startingChapter أكبر من النسخة الأخيرة الحالية" }),
 				});
 			}
 
-			const version = await prisma.$transaction(async (tx) => {
-				if (latestVersion) {
-					await tx.keywordVersion.update({
-						where: { id: latestVersion.id },
-						data: { endingChapter: startingChapter - 1 },
-					});
-				}
+			return createWithReplay(
+				() =>
+					prisma.$transaction(async (tx) => {
+						if (latestVersion) {
+							await tx.keywordVersion.update({
+								where: { id: latestVersion.id },
+								data: { endingChapter: startingChapter - 1 },
+							});
+						}
 
-				return tx.keywordVersion.create({
-					data: {
-						description: sanitizedBody.description ?? null,
-						categoryId,
-						natureId,
-						imageId: sanitizedBody.imageId ?? null,
-						keywordId,
-						startingChapter,
-						endingChapter,
-						createdById: authedUser.id,
-					},
-					include: versionInclude,
-				});
-			});
-
-			return version;
+						return tx.keywordVersion.create({
+							data: {
+								id: body.id,
+								description: sanitizedBody.description ?? null,
+								categoryId,
+								natureId,
+								imageId: sanitizedBody.imageId ?? null,
+								keywordId,
+								startingChapter,
+								endingChapter,
+								createdById: authedUser.id,
+							},
+							include: versionInclude,
+						});
+					}),
+				findVersion,
+				isReplay,
+				t,
+			);
 		},
 		{
 			body: t.Object({
+				id: t.String({ format: "uuid" }),
 				keywordId: t.String({ format: "uuid" }),
 				categoryId: t.Optional(t.String({ format: "uuid" })),
 				natureId: t.Optional(t.String({ format: "uuid" })),
-				description: t.Optional(t.String()),
-				imageId: t.Optional(t.String({ format: "uuid" })),
+				description: t.Optional(t.Nullable(t.String())),
+				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				currentChapter: t.Optional(t.Number({ minimum: 0 })),
 				startingChapter: t.Optional(t.Number({ minimum: 0 })),
 				endingChapter: t.Optional(t.Nullable(t.Number({ minimum: 0 }))),
@@ -151,6 +181,9 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 		},
 	)
 
+	// A moderator, the version's own creator or the parent keyword's creator may edit it.
+	// Partial: only sent fields change; `null` clears the description or image. Chapter
+	// ranges change only for moderators.
 	.put(
 		"/:id",
 		async ({ t, prisma, params: { id }, body, authedUser }) => {
@@ -159,11 +192,15 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				include: { keyword: true },
 			});
 
-			if (!existing) {
-				throw new HttpError({ statusCode: 404, message: t({ en: "Version not found", ar: "النسخة غير موجودة" }) });
-			}
+			if (!existing) throw versionNotFound(t);
 
-			assertOwnsResource(existing.keyword.createdById, authedUser);
+			assertOwnsAnyOf([existing.createdById, existing.keyword.createdById], authedUser);
+			await assertNotStale(
+				existing,
+				body.baseUpdatedAt,
+				() => prisma.keywordVersion.findUniqueOrThrow({ where: { id }, include: versionInclude }),
+				t,
+			);
 
 			const sanitizedBody = sanitizeObject(body);
 
@@ -176,8 +213,8 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 						? prisma.keywordNature.findUnique({ where: { id: sanitizedBody.natureId } })
 						: Promise.resolve(null),
 				]);
-				if (sanitizedBody.categoryId && !category) throw new HttpError({ statusCode: 404, message: t({ en: "Category not found", ar: "الفئة غير موجودة" }) });
-				if (sanitizedBody.natureId && !nature) throw new HttpError({ statusCode: 404, message: t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }) });
+				if (sanitizedBody.categoryId && !category) throw parentNotFound(t({ en: "Category not found", ar: "الفئة غير موجودة" }));
+				if (sanitizedBody.natureId && !nature) throw parentNotFound(t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }));
 			}
 
 			const updateData: Record<string, unknown> = {
@@ -192,28 +229,28 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				if (sanitizedBody.endingChapter !== undefined) updateData.endingChapter = sanitizedBody.endingChapter;
 			}
 
-			const version = await prisma.keywordVersion.update({
+			return prisma.keywordVersion.update({
 				where: { id },
 				data: updateData,
 				include: versionInclude,
 			});
-
-			return version;
 		},
 		{
 			params: t.Object({ id: t.String({ format: "uuid" }) }),
 			body: t.Object({
-				description: t.Optional(t.String()),
+				baseUpdatedAt: t.String({ format: "date-time" }),
+				description: t.Optional(t.Nullable(t.String())),
 				categoryId: t.Optional(t.String({ format: "uuid" })),
 				natureId: t.Optional(t.String({ format: "uuid" })),
-				imageId: t.Optional(t.String({ format: "uuid" })),
+				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				startingChapter: t.Optional(t.Number({ minimum: 0 })),
 				endingChapter: t.Optional(t.Nullable(t.Number({ minimum: 0 }))),
 			}),
-			response: { 200: versionWithRelationsShape },
+			response: { 200: versionWithRelationsShape, 409: staleWriteSchema(versionWithRelationsShape) },
 		},
 	)
 
+	// Deletes are unconditional, except that the base and the only version are kept.
 	.delete(
 		"/:id",
 		async ({ t, prisma, params: { id }, authedUser }) => {
@@ -222,11 +259,9 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				include: { ...versionInclude, keyword: true },
 			});
 
-			if (!existing) {
-				throw new HttpError({ statusCode: 404, message: t({ en: "Version not found", ar: "النسخة غير موجودة" }) });
-			}
+			if (!existing) throw versionNotFound(t);
 
-			assertOwnsResource(existing.keyword.createdById, authedUser);
+			assertOwnsAnyOf([existing.createdById, existing.keyword.createdById], authedUser);
 
 			const [versionCount, baseVersion] = await Promise.all([
 				prisma.keywordVersion.count({ where: { keywordId: existing.keywordId } }),
@@ -239,6 +274,8 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 
 			if (versionCount <= 1) {
 				throw new HttpError({
+					statusCode: 400,
+					code: "VERSION_ONLY_PROTECTED",
 					message: t({ en: "Cannot delete the only version of a keyword", ar: "لا يمكن حذف النسخة الوحيدة للكلمة المفتاحية" }),
 				});
 			}
@@ -246,6 +283,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 			if (baseVersion?.id === id) {
 				throw new HttpError({
 					statusCode: 400,
+					code: "VERSION_BASE_PROTECTED",
 					message: t({ en: "Cannot delete the base version of a keyword", ar: "لا يمكن حذف النسخة الأساسية للكلمة المفتاحية" }),
 				});
 			}

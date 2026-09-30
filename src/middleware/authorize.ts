@@ -59,18 +59,33 @@ export function canModerate(authedUser: AuthedUser): boolean {
   return hasPermission(authedUser, CAPABILITIES.moderate);
 }
 
+function notOwner(): never {
+  throw new HttpError({ statusCode: 403, code: 'NOT_OWNER', message: 'You can only modify resources you created' });
+}
+
 /** Readers may only mutate what they created; moderators may mutate anything. */
 export function assertOwnsResource(
   createdById: string | null | undefined,
+  authedUser: AuthedUser,
+): void {
+  assertOwnsAnyOf([createdById], authedUser);
+}
+
+/**
+ * Like `assertOwnsResource`, for rows more than one reader may change: an alias
+ * or version may be edited by its own creator or by its parent keyword's creator.
+ */
+export function assertOwnsAnyOf(
+  createdByIds: (string | null | undefined)[],
   authedUser: AuthedUser,
 ): void {
   if (canModerate(authedUser)) {
     return;
   }
 
-  if (createdById && createdById === authedUser.id) {
+  if (createdByIds.some((createdById) => createdById && createdById === authedUser.id)) {
     return;
   }
 
-  forbidden('You can only modify resources you created');
+  notOwner();
 }

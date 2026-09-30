@@ -1,4 +1,4 @@
-import { t } from 'elysia';
+import { t, type TSchema } from 'elysia';
 
 export const paginationSchema = t.Object(
   {
@@ -28,4 +28,15 @@ export const sortingSchema = t.Object(
 
 export const errorSchema = t.Object({
   message: t.String(),
+  /** Machine-readable reason (`src/lib/sync/error-codes.ts`). */
+  code: t.Optional(t.String()),
 });
+
+/** 409 `STALE_WRITE`: the row changed since `baseUpdatedAt`; `current` is it in the route's 200 shape. */
+export function staleWriteSchema<T extends TSchema>(current: T) {
+  return t.Object({
+    message: t.String(),
+    code: t.Literal('STALE_WRITE'),
+    current,
+  });
+}

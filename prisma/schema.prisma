@@ -310,10 +310,7 @@ model Keyword {
 
 model KeywordAlias {
   id            String       @id @default(uuid())
-  // The name the alias was added with; old clients read only this.
-  name          String
-  // The alias in each language, like Keyword.nameAr/nameEn. One of them usually repeats `name`;
-  // older aliases may have neither, so read them through `aliasNames` (src/utils/translation.ts).
+  // The alias in each language, like Keyword.nameAr/nameEn; at least one is set.
   nameAr        String?
   nameEn        String?
   description   String?
@@ -339,7 +336,8 @@ model KeywordAlias {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([keywordId, name])
+  @@unique([keywordId, nameAr])
+  @@unique([keywordId, nameEn])
   @@index([keywordId])
 }
 
@@ -463,4 +461,23 @@ model WebsiteNovelBias {
   @@unique([websiteSelectorId, novelId])
   @@index([novelId])
   @@index([websiteSelectorId])
+}
+
+// Change feed for delta sync (`/api/user/sync/.../changes`), written by database
+// triggers on every insert, update and delete of the synced tables (migration
+// `sync_change_feed`), so route code, dashboard merges, cascades and bulk updates
+// are all recorded. `seq` orders changes exactly; old rows are pruned by a cron.
+model SyncChange {
+  seq      BigInt   @id @default(autoincrement())
+  // novel, keyword, keywordAlias, keywordVersion, replacement, websiteNovelBias, keywordCategory, keywordNature
+  entity   String
+  entityId String
+  // The novel the row belongs to; null for lookups, and for children deleted with their keyword.
+  novelId  String?
+  // insert, update or delete
+  op       String
+  at       DateTime @default(now())
+
+  @@index([novelId, seq])
+  @@index([entity, seq])
 }

@@ -18,10 +18,15 @@ async function findExistingUploadedFile(
   });
 }
 
+/**
+ * Stores an uploaded file's row. `owner` gives the client's file ID and the
+ * uploader (reader uploads); dashboard uploads let the database pick the ID.
+ */
 export async function saveUploadedFile(
   prisma: PrismaClient,
   uploaded: ImageData,
   type: FileType,
+  owner?: { id: string; userId: string },
 ): Promise<File> {
   const existing = await findExistingUploadedFile(prisma, uploaded);
   if (existing) {
@@ -31,6 +36,7 @@ export async function saveUploadedFile(
   try {
     return await prisma.file.create({
       data: {
+        ...(owner ? { id: owner.id, userId: owner.userId } : {}),
         url: uploaded.url,
         provider_image_id: uploaded.id,
         delete_url: uploaded.delete_url,
