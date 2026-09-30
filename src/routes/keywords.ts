@@ -13,7 +13,7 @@ import {
 	ReplacementPlain,
 } from "@/lib/db";
 import type { PrismaClient } from "@prisma/client";
-import { assertNotStale } from "@/lib/sync/precondition";
+import { assertNotStale, compareAndSwap } from "@/lib/sync/precondition";
 import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsResource, authorize } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
@@ -373,14 +373,14 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				...(names.nameEn && names.nameEn !== existingKeyword.nameEn ? [{ nameEn: names.nameEn }] : []),
 			], id);
 
-			const keyword = await prisma.keyword.update({
-				where: { id },
+			const keyword = await compareAndSwap(() => prisma.keyword.update({
+				where: { id, updatedAt: existingKeyword.updatedAt },
 				data: {
 					...names,
 					matchingType: sanitizedBody.matchingType,
 				},
 				include: keywordInclude,
-			});
+			}), () => prisma.keyword.findUniqueOrThrow({ where: { id }, include: keywordInclude }), t);
 
 			return keyword as unknown as KeywordWithChildren;
 		},

@@ -10,7 +10,7 @@ import {
   lookupNameFilters,
   lookupNameTaken,
 } from '@/lib/sync/lookups';
-import { assertNotStale } from '@/lib/sync/precondition';
+import { assertNotStale, compareAndSwap } from '@/lib/sync/precondition';
 import { createWithReplay, findReplay } from '@/lib/sync/replay';
 import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
@@ -166,14 +166,14 @@ export const keywordNatures = new Elysia({
         id,
       );
 
-      return prisma.keywordNature.update({
-        where: { id },
+      return compareAndSwap(() => prisma.keywordNature.update({
+        where: { id, updatedAt: existing.updatedAt },
         data: {
           ...names,
           color: body.color,
           description: body.description,
         },
-      });
+      }), () => prisma.keywordNature.findUniqueOrThrow({ where: { id } }), t);
     },
     {
       params: t.Object({

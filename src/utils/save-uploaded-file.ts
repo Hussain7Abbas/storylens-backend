@@ -8,7 +8,7 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 async function findExistingUploadedFile(
-  prisma: PrismaClient,
+  prisma: Pick<PrismaClient, 'file'>,
   uploaded: ImageData,
 ): Promise<File | null> {
   return prisma.file.findFirst({
@@ -23,7 +23,7 @@ async function findExistingUploadedFile(
  * uploader (reader uploads); dashboard uploads let the database pick the ID.
  */
 export async function saveUploadedFile(
-  prisma: PrismaClient,
+  prisma: Pick<PrismaClient, 'file'>,
   uploaded: ImageData,
   type: FileType,
   owner?: { id: string; userId: string },

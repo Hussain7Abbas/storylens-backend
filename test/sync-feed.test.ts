@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { prisma } from '@/lib/db';
-import { currentCursor, FEED_SETTLE_MS, pruneFeed, readFeed } from '@/lib/sync/feed';
+import { currentCursor, pruneFeed, readFeed } from '@/lib/sync/feed';
 import { type Actor, call, cleanup, live, makeActor, makeStyles } from './helpers/live-db';
 
 type Feed = {
@@ -22,11 +22,8 @@ let novelId: string;
 let categoryId: string;
 let natureId: string;
 const translate = ({ en }: { en: string; ar: string }) => en;
-// Tests read the feed as if every change had settled.
-const later = () => new Date(Date.now() + FEED_SETTLE_MS + 1000);
-
 async function feedSince(since: number, limit?: number) {
-  const page = await readFeed(prisma, { novelId }, since, limit ?? 1000, translate, later());
+  const page = await readFeed(prisma, { novelId }, since, limit ?? 1000, translate);
   return page;
 }
 
@@ -50,8 +47,55 @@ afterAll(async () => {
 });
 
 describe('change feed', () => {
+  live('serializes feed sequence allocation until the writer commits', async () => {
+    const start = await currentCursor(prisma);
+    const firstId = crypto.randomUUID();
+    const secondId = crypto.randomUUID();
+    let signalInserted!: () => void;
+    let release!: () => void;
+    const inserted = new Promise<void>((resolve) => { signalInserted = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const first = prisma.$transaction(async (tx) => {
+      await tx.keywordCategory.create({ data: { id: firstId, nameEn: `Held ${firstId}`, color: '#112233' } });
+      signalInserted();
+      await held;
+    });
+    await inserted;
+    let secondCommitted = false;
+    const second = prisma.keywordNature.create({ data: { id: secondId, nameEn: `Later ${secondId}`, color: '#112233' } })
+      .then(() => { secondCommitted = true; });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(secondCommitted).toBe(false);
+    } finally {
+      release();
+    }
+    await Promise.all([first, second]);
+    ids.categories.push(firstId);
+    ids.natures.push(secondId);
+    const changes = await prisma.syncChange.findMany({
+      where: { entityId: { in: [firstId, secondId] } }, orderBy: { seq: 'asc' },
+    });
+    expect(changes.map((change) => change.entityId)).toEqual([firstId, secondId]);
+    expect(Number(changes[0]!.seq)).toBeGreaterThan(start);
+  });
+
+  live('serves complete novel, lookup and catalogue snapshots with cursors', async () => {
+    const id = crypto.randomUUID();
+    const versionId = crypto.randomUUID();
+    expect((await call(reader, 'POST', '/keywords', { id, versionId, novelId, categoryId, natureId, nameEn: `Snapshot ${id}` })).status).toBe(200);
+    const novel = await call<{ keywords: { id: string }[]; cursor: number }>(reader, 'GET', `/sync/snapshot/novels/${novelId}`);
+    const lookups = await call<{ categories: { id: string }[]; cursor: number }>(reader, 'GET', '/sync/snapshot/lookups');
+    const catalogue = await call<{ novels: { id: string }[]; cursor: number }>(reader, 'GET', '/sync/snapshot/catalogue');
+    expect([novel.status, lookups.status, catalogue.status]).toEqual([200, 200, 200]);
+    expect(novel.body.keywords.map((row) => row.id)).toContain(id);
+    expect(lookups.body.categories.map((row) => row.id)).toContain(categoryId);
+    expect(catalogue.body.novels.map((row) => row.id)).toContain(novelId);
+    expect(novel.body.cursor).toBeGreaterThan(0);
+  });
+
   live('records writes, cascades and bulk updates and serves them after a cursor', async () => {
-    const start = await currentCursor(prisma, later());
+    const start = await currentCursor(prisma);
     const keyword = { id: crypto.randomUUID(), versionId: crypto.randomUUID(), nameEn: `K ${marker}`, novelId, categoryId, natureId };
     await call(reader, 'POST', '/keywords', keyword);
     const alias = await call<{ id: string }>(reader, 'POST', '/keyword-aliases', { id: crypto.randomUUID(), keywordId: keyword.id, nameEn: `A ${marker}` });
@@ -69,10 +113,10 @@ describe('change feed', () => {
 
     const response = await call<Feed>(reader, 'GET', `/sync/novels/${novelId}/changes?since=${start}`);
     expect(response.status).toBe(200);
-    // Unsettled changes are returned, but the cursor does not move past them.
+    // The cursor advances through the committed changes.
     expect(response.body.keywords.map((row) => row.id)).toEqual([keyword.id]);
     expect(response.body.replacements.find((row) => row.id === first.id)?.to).toBe(`z-${marker}`);
-    expect(response.body.cursor).toBe(start);
+    expect(response.body.cursor).toBe(page.cursor);
 
     // A keyword delete cascades to its alias and version.
     const cursor = page.cursor;
@@ -84,7 +128,7 @@ describe('change feed', () => {
   });
 
   live('pages through more changes than the limit in order', async () => {
-    const start = await currentCursor(prisma, later());
+    const start = await currentCursor(prisma);
     const created: string[] = [];
     for (let index = 0; index < 5; index++) {
       const id = crypto.randomUUID();
@@ -119,15 +163,15 @@ describe('change feed', () => {
   });
 
   live('serves lookups and catalogue changes, including deletions', async () => {
-    const start = await currentCursor(prisma, later());
+    const start = await currentCursor(prisma);
     const category = await prisma.keywordCategory.create({ data: { nameEn: `Feed cat ${marker}`, color: '#000000' } });
     await prisma.keywordCategory.delete({ where: { id: category.id } });
     const novel = await prisma.novel.create({ data: { nameEn: `Feed new ${marker}` } });
     ids.novels.push(novel.id);
 
-    const lookups = await readFeed(prisma, { entities: ['keywordCategory', 'keywordNature'] }, start, 1000, translate, later());
+    const lookups = await readFeed(prisma, { entities: ['keywordCategory', 'keywordNature'] }, start, 1000, translate);
     expect(lookups.ids.keywordCategory).toEqual([category.id]);
-    const catalogue = await readFeed(prisma, { entities: ['novel'] }, start, 1000, translate, later());
+    const catalogue = await readFeed(prisma, { entities: ['novel'] }, start, 1000, translate);
     expect(catalogue.ids.novel).toContain(novel.id);
 
     const lookupsResponse = await call<{ deleted: { entity: string; id: string }[] }>(reader, 'GET', `/sync/lookups/changes?since=${start}`);

@@ -2,6 +2,7 @@ import { expect, it } from 'bun:test';
 import { prisma } from '@/lib/db';
 import { createSessionToken } from '@/lib/auth/session';
 import { app } from '@/server';
+import { syncPermissions } from '@/lib/permissions';
 
 const live = process.env.STORYLENS_LIVE_DB_TEST === '1' ? it : it.skip;
 
@@ -10,6 +11,7 @@ live('admin keyword merges and chapter ranges stay safe in PostgreSQL', async ()
   let userId: string | undefined;
   let novelId: string | undefined;
   try {
+    await syncPermissions(prisma, app.routes);
     const role = await prisma.role.findUniqueOrThrow({ where: { slug: 'super-admin' } });
     const user = await prisma.user.create({
       data: {

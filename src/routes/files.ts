@@ -23,28 +23,29 @@ export const files = new Elysia({ prefix: '/files', tags: ['Files'] })
       );
       if (replay) return replay;
 
-      if (body.type === 'Image') {
-        const uploadedImage = await uploadImage({
-          file: body.file,
+      // A transaction-scoped lock for this client ID spans the provider call.
+      // A concurrent replay waits, sees the committed row and skips upload.
+      return prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(20260930, hashtext(${body.id}))`;
+        const committed = await findReplay(
+          () => tx.file.findUnique({ where: { id: body.id } }),
+          (file) => file.userId === authedUser.id,
+          t,
+        );
+        if (committed) return committed;
+
+        if (body.type === 'Image') {
+          const uploaded = await uploadImage({ file: body.file });
+          return saveUploadedFile(tx, uploaded, body.type, { id: body.id, userId: authedUser.id });
+        }
+        if (body.type === 'Video') {
+          const uploaded = await uploadVideo({ file: body.file });
+          return saveUploadedFile(tx, uploaded, body.type, { id: body.id, userId: authedUser.id });
+        }
+        throw new HttpError({
+          message: t({ en: 'Invalid file type', ar: 'نوع الملف غير صالح' }),
         });
-
-        return saveUploadedFile(prisma, uploadedImage, body.type, { id: body.id, userId: authedUser.id });
-      }
-
-      if (body.type === 'Video') {
-        const uploadedVideo = await uploadVideo({
-          file: body.file,
-        });
-
-        return saveUploadedFile(prisma, uploadedVideo, body.type, { id: body.id, userId: authedUser.id });
-      }
-
-      throw new HttpError({
-        message: t({
-          en: 'Invalid file type',
-          ar: 'نوع الملف غير صالح',
-        }),
-      });
+      }, { timeout: 120_000 });
     },
     {
       body: t.Object({

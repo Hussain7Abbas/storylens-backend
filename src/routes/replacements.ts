@@ -6,7 +6,7 @@ import {
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema, staleWriteSchema } from '@/schemas/common';
-import { assertNotStale } from '@/lib/sync/precondition';
+import { assertNotStale, compareAndSwap } from '@/lib/sync/precondition';
 import { createWithReplay, findReplay } from '@/lib/sync/replay';
 import { assertOwnsResource, authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
@@ -254,10 +254,10 @@ export const replacements = new Elysia({
       };
       await validateReplacement({ ...merged, exceptId: id }, prisma, t);
 
-      return prisma.$transaction(async (tx) => {
+      return compareAndSwap(() => prisma.$transaction(async (tx) => {
         const keyword = await rewriteChain(merged, tx);
         return tx.replacement.update({
-          where: { id },
+          where: { id, updatedAt: existing.updatedAt },
           data: {
             from: sanitizedBody.from,
             to: sanitizedBody.to,
@@ -266,7 +266,7 @@ export const replacements = new Elysia({
           },
           include: replacementInclude,
         });
-      });
+      }), () => prisma.replacement.findUniqueOrThrow({ where: { id }, include: replacementInclude }), t);
     },
     {
       params: t.Object({

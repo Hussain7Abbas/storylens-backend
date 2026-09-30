@@ -1,4 +1,5 @@
 import { Elysia, t } from 'elysia';
+import { Prisma } from '@prisma/client';
 import {
   FilePlain,
   KeywordAliasPlain,
@@ -20,6 +21,7 @@ import {
 } from '@/lib/sync/feed';
 import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
+import { HttpError } from '@/utils/errors';
 
 const styleInclude = { category: true, nature: true, image: true } as const;
 
@@ -32,6 +34,11 @@ const styledChild = (plain: typeof KeywordAliasPlain | typeof KeywordVersionPlai
   });
 
 const novelShape = t.Composite([NovelPlain, t.Object({ image: t.Nullable(FilePlain) })]);
+const snapshotKeywordShape = t.Object({
+  ...KeywordPlain.properties,
+  aliases: t.Array(styledChild(KeywordAliasPlain)),
+  versions: t.Array(styledChild(KeywordVersionPlain)),
+});
 const deletedShape = t.Array(t.Object({ entity: t.String(), id: t.String() }));
 const feedQuery = t.Object({
   since: t.Optional(t.Numeric({ minimum: 0 })),
@@ -51,6 +58,53 @@ export const sync = new Elysia({ prefix: '/sync', tags: ['Sync'] })
 
   .get('/protocol', () => ({ version: SYNC_PROTOCOL_VERSION }), {
     response: { 200: t.Object({ version: t.Number() }) },
+  })
+
+  // Full pulls are a single repeatable-read snapshot. Offset-paginated lists
+  // can skip unchanged rows when a preceding row is deleted mid-pull.
+  .get('/snapshot/catalogue', async ({ prisma }) => prisma.$transaction(async (tx) => {
+    const cursor = await currentCursor(tx);
+    const novels = await tx.novel.findMany({ include: { image: true } });
+    return { novels, cursor };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 }), {
+    response: { 200: t.Object({ novels: t.Array(novelShape), cursor: t.Number() }) },
+  })
+
+  .get('/snapshot/lookups', async ({ prisma }) => prisma.$transaction(async (tx) => {
+    const cursor = await currentCursor(tx);
+    const [categories, natures] = await Promise.all([
+      tx.keywordCategory.findMany(), tx.keywordNature.findMany(),
+    ]);
+    return { categories, natures, cursor };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 }), {
+    response: { 200: t.Object({ categories: t.Array(KeywordCategoryPlain), natures: t.Array(KeywordNaturePlain), cursor: t.Number() }) },
+  })
+
+  .get('/snapshot/novels/:id', async ({ prisma, params: { id }, t: translate }) => prisma.$transaction(async (tx) => {
+    const cursor = await currentCursor(tx);
+    const novel = await tx.novel.findUnique({ where: { id }, include: { image: true } });
+    if (!novel) throw new HttpError({ statusCode: 404, code: 'NOT_FOUND', message: translate({ en: 'Novel not found', ar: 'الرواية غير موجودة' }) });
+    const [keywords, replacements, biases] = await Promise.all([
+      tx.keyword.findMany({
+        where: { novelId: id },
+        include: {
+          aliases: { include: { category: true, nature: true, image: true }, orderBy: { createdAt: 'asc' } },
+          versions: { include: { category: true, nature: true, image: true }, orderBy: { startingChapter: 'asc' } },
+        },
+      }),
+      tx.replacement.findMany({ where: { novelId: id }, include: { keyword: true } }),
+      tx.websiteNovelBias.findMany({ where: { novelId: id }, include: { websiteSelector: true } }),
+    ]);
+    return { novel, keywords, replacements, biases, cursor };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 }), {
+    params: t.Object({ id: t.String({ format: 'uuid' }) }),
+    response: { 200: t.Object({
+      novel: novelShape,
+      keywords: t.Array(snapshotKeywordShape),
+      replacements: t.Array(t.Composite([ReplacementPlain, t.Object({ keyword: t.Nullable(KeywordPlain) })])),
+      biases: t.Array(t.Composite([WebsiteNovelBiasPlain, t.Object({ websiteSelector: WebsiteSelectorPlain })])),
+      cursor: t.Number(),
+    }) },
   })
 
   .get(

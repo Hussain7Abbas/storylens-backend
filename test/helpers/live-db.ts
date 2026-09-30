@@ -50,6 +50,7 @@ export async function call<T = Record<string, unknown>>(
       headers: {
         ...(actor ? { Authorization: `Bearer ${actor.token}` } : {}),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        'X-Client-Version': 'extension/3.2.2',
         ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),

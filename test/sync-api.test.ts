@@ -130,6 +130,17 @@ describe('client IDs and replays', () => {
     expect((await prisma.replacement.findUniqueOrThrow({ where: { id: chainStart.id } })).to).toBe(`b-${marker}`);
   });
 
+  live('serializes two new versions for the same chapter', async () => {
+    const { body: keyword } = await createKeyword(owner, `Parallel versions ${marker}`);
+    const results = await Promise.all([
+      call(owner, 'POST', '/keyword-versions', { id: crypto.randomUUID(), keywordId: keyword.id, currentChapter: 10 }),
+      call(owner, 'POST', '/keyword-versions', { id: crypto.randomUUID(), keywordId: keyword.id, currentChapter: 10 }),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual([200, 400]);
+    const versions = await prisma.keywordVersion.findMany({ where: { keywordId: keyword.id }, orderBy: { startingChapter: 'asc' } });
+    expect(versions.map((version) => [version.startingChapter, version.endingChapter])).toEqual([[0, 9], [10, null]]);
+  });
+
   live('requires client IDs on creates and baseUpdatedAt on updates', async () => {
     const missingId = await call(owner, 'POST', '/keywords', { nameEn: `No id ${marker}`, novelId, categoryId, natureId });
     expect(missingId.status).toBe(422);
@@ -142,6 +153,20 @@ describe('client IDs and replays', () => {
 });
 
 describe('stale writes', () => {
+  live('allows only one simultaneous update from a shared revision', async () => {
+    const { body, result } = await createKeyword(owner, `Parallel stale ${marker}`);
+    const baseUpdatedAt = result.body.updatedAt;
+    const results = await Promise.all([
+      call<ErrorBody>(owner, 'PUT', `/keywords/${body.id}`, { baseUpdatedAt, nameEn: `Parallel A ${marker}` }),
+      call<ErrorBody>(owner, 'PUT', `/keywords/${body.id}`, { baseUpdatedAt, nameEn: `Parallel B ${marker}` }),
+    ]);
+    expect(results.map((item) => item.status).sort()).toEqual([200, 409]);
+    expect(results.find((item) => item.status === 409)?.body.code).toBe('STALE_WRITE');
+    const future = await call<ErrorBody>(owner, 'PUT', `/keywords/${body.id}`, {
+      baseUpdatedAt: new Date(Date.now() + 60_000).toISOString(), matchingType: 'PARTIAL',
+    });
+    expect([future.status, future.body.code]).toEqual([409, 'STALE_WRITE']);
+  });
   live('accepts the current base and answers 409 with the current row for an older one', async () => {
     const { body, result } = await createKeyword(owner, `Stale ${marker}`);
     const base = result.body.updatedAt;

@@ -24,7 +24,7 @@ async function upload(token: string, fields: Record<string, string | Blob>) {
   const response = await app.handle(
     new Request('http://localhost/api/user/files/upload', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, 'X-Client-Version': 'extension/3.2.2' },
       body: form,
     }),
   );
@@ -55,5 +55,20 @@ describe('file uploads with client IDs', () => {
     expect([foreign.status, foreign.body.code]).toEqual([409, 'ID_CONFLICT']);
     const missing = await upload(reader.token, { type: 'Image', file: image });
     expect(missing.status).toBe(422);
+  });
+
+  live('serializes concurrent replays before the provider call', async () => {
+    const reader = await makeActor('reader', marker);
+    users.push(reader.id);
+    const image = new File([new Uint8Array([137, 80, 78, 71])], 'parallel.png', { type: 'image/png' });
+    const id = crypto.randomUUID();
+    const before = uploads;
+    const [first, second] = await Promise.all([
+      upload(reader.token, { id, type: 'Image', file: image }),
+      upload(reader.token, { id, type: 'Image', file: image }),
+    ]);
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect([first.body.id, second.body.id]).toEqual([id, id]);
+    expect(uploads - before).toBe(1);
   });
 });

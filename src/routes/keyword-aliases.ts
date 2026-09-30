@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordAliasPlain, KeywordCategoryPlain, KeywordNaturePlain, MatchingType } from "@/lib/db";
-import { assertNotStale } from "@/lib/sync/precondition";
+import { assertNotStale, compareAndSwap } from "@/lib/sync/precondition";
 import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsAnyOf, authorize } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
@@ -193,8 +193,8 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				...(names.nameEn && names.nameEn !== existing.nameEn ? [{ nameEn: names.nameEn }] : []),
 			], id);
 
-			return prisma.keywordAlias.update({
-				where: { id },
+			return compareAndSwap(() => prisma.keywordAlias.update({
+				where: { id, updatedAt: existing.updatedAt },
 				data: {
 					...names,
 					description: sanitizedBody.description,
@@ -205,7 +205,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 					overrideStyle: sanitizedBody.overrideStyle,
 				},
 				include: aliasInclude,
-			});
+			}), () => prisma.keywordAlias.findUniqueOrThrow({ where: { id }, include: aliasInclude }), t);
 		},
 		{
 			params: t.Object({ id: t.String({ format: "uuid" }) }),

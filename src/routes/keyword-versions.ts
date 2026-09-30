@@ -1,11 +1,12 @@
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordCategoryPlain, KeywordNaturePlain, KeywordVersionPlain } from "@/lib/db";
-import { assertNotStale } from "@/lib/sync/precondition";
+import { assertNotStale, compareAndSwap } from "@/lib/sync/precondition";
 import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsAnyOf, authorize, canModerate } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { HttpError } from "@/utils/errors";
+import { lockKeywordVersions } from "@/routes/admin/version-ranges";
 import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
 import { sanitizeObject } from "@/utils/sanitize";
 
@@ -105,11 +106,6 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 			if (categoryId && !category) throw parentNotFound(t({ en: "Category not found", ar: "الفئة غير موجودة" }));
 			if (natureId && !nature) throw parentNotFound(t({ en: "Nature not found", ar: "الطبيعة غير موجودة" }));
 
-			const latestVersion = await prisma.keywordVersion.findFirst({
-				where: { keywordId, endingChapter: null, id: { not: body.id } },
-				orderBy: { startingChapter: "desc" },
-			});
-
 			let startingChapter: number;
 			let endingChapter: number | null = null;
 
@@ -127,17 +123,21 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				startingChapter = sanitizedBody.currentChapter;
 			}
 
-			if (latestVersion && startingChapter <= latestVersion.startingChapter) {
-				throw new HttpError({
-					statusCode: 400,
-					code: "VERSION_NOT_AFTER_LATEST",
-					message: t({ en: "startingChapter must be greater than the current latest version", ar: "يجب أن يكون startingChapter أكبر من النسخة الأخيرة الحالية" }),
-				});
-			}
-
 			return createWithReplay(
 				() =>
 					prisma.$transaction(async (tx) => {
+						await lockKeywordVersions(tx, keywordId);
+						const latestVersion = await tx.keywordVersion.findFirst({
+							where: { keywordId, endingChapter: null, id: { not: body.id } },
+							orderBy: { startingChapter: "desc" },
+						});
+						if (latestVersion && startingChapter <= latestVersion.startingChapter) {
+							throw new HttpError({
+								statusCode: 400,
+								code: "VERSION_NOT_AFTER_LATEST",
+								message: t({ en: "startingChapter must be greater than the current latest version", ar: "يجب أن يكون startingChapter أكبر من النسخة الأخيرة الحالية" }),
+							});
+						}
 						if (latestVersion) {
 							await tx.keywordVersion.update({
 								where: { id: latestVersion.id },
@@ -229,11 +229,11 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				if (sanitizedBody.endingChapter !== undefined) updateData.endingChapter = sanitizedBody.endingChapter;
 			}
 
-			return prisma.keywordVersion.update({
-				where: { id },
+			return compareAndSwap(() => prisma.keywordVersion.update({
+				where: { id, updatedAt: existing.updatedAt },
 				data: updateData,
 				include: versionInclude,
-			});
+			}), () => prisma.keywordVersion.findUniqueOrThrow({ where: { id }, include: versionInclude }), t);
 		},
 		{
 			params: t.Object({ id: t.String({ format: "uuid" }) }),

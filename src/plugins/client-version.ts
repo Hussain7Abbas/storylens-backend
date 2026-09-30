@@ -3,6 +3,8 @@ import { Elysia, status } from 'elysia';
 import {
   CLIENT_VERSION_HEADER,
   MIN_CLIENT_VERSION_HEADER,
+  MIN_CLIENT_VERSIONS,
+  parseClientVersion,
   requiredClientVersion,
 } from '@/lib/compat/client-version';
 import { shouldLogHourly } from '@/lib/compat/deprecation';
@@ -15,10 +17,17 @@ import { toLanguage } from '@/utils/translation';
  */
 export const clientVersion = new Elysia({ name: 'client-version' }).onRequest(
   ({ request, set }) => {
-    if (!new URL(request.url).pathname.startsWith('/api/')) return;
+    const pathname = new URL(request.url).pathname;
+    if (!pathname.startsWith('/api/')) return;
 
     const client = request.headers.get(CLIENT_VERSION_HEADER);
-    const minVersion = requiredClientVersion(client);
+    // Installed clients predating the header must also be stopped before they
+    // send an old write shape to the new sync contract. Website and dashboard
+    // routes do not use these reader mutations.
+    const syncWrite = !['GET', 'HEAD', 'OPTIONS'].includes(request.method)
+      && /^\/api\/user\/(keywords|keyword-aliases|keyword-versions|replacements|keyword-categories|keyword-natures|files\/upload)(?:\/|$)/.test(pathname);
+    const minVersion = requiredClientVersion(client)
+      ?? (syncWrite && !parseClientVersion(client) ? MIN_CLIENT_VERSIONS.extension : null);
     if (!minVersion) return;
 
     // Refused before routing, so the request logger never sees it.

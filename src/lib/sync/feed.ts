@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { HttpError } from '@/utils/errors';
 
 /** Protocol version of this release's sync contract; the extension refuses to sync below it. */
@@ -19,14 +19,6 @@ export type FeedEntity = (typeof FEED_ENTITIES)[number];
 /** Feed rows are kept this long; an older cursor answers 410 `CURSOR_EXPIRED`. */
 export const FEED_RETENTION_DAYS = 90;
 
-/**
- * Sequence values are taken at insert time but become visible at commit, so a
- * slow transaction can commit a lower `seq` after a higher one was read. Cursors
- * never move past changes younger than this; those rows are sent again next time
- * (applying rows is idempotent).
- */
-export const FEED_SETTLE_MS = 60_000;
-
 export const FEED_DEFAULT_LIMIT = 1000;
 
 type FeedScope = { novelId: string } | { entities: FeedEntity[] };
@@ -43,14 +35,7 @@ function scopeWhere(scope: FeedScope) {
 }
 
 /** The cursor a full pull starts from: every change before it is in that pull. */
-export async function currentCursor(prisma: PrismaClient, now = new Date()): Promise<number> {
-  const settleFrom = new Date(now.getTime() - FEED_SETTLE_MS);
-  const unsettled = await prisma.syncChange.findFirst({
-    where: { at: { gt: settleFrom } },
-    orderBy: { seq: 'asc' },
-    select: { seq: true },
-  });
-  if (unsettled) return Number(unsettled.seq) - 1;
+export async function currentCursor(prisma: PrismaClient | Prisma.TransactionClient): Promise<number> {
   const latest = await prisma.syncChange.findFirst({ orderBy: { seq: 'desc' }, select: { seq: true } });
   return latest ? Number(latest.seq) : 0;
 }
@@ -65,7 +50,6 @@ export async function readFeed(
   since: number,
   limit: number,
   t: (messages: { en: string; ar: string }) => string,
-  now = new Date(),
 ): Promise<FeedPage> {
   const oldest = await prisma.syncChange.findFirst({ orderBy: { seq: 'asc' }, select: { seq: true } });
   if (oldest && since < Number(oldest.seq) - 1) {
@@ -82,8 +66,6 @@ export async function readFeed(
     take: limit + 1,
   });
   const page = rows.slice(0, limit);
-  const settleFrom = now.getTime() - FEED_SETTLE_MS;
-  const firstUnsettled = page.find((row) => row.at.getTime() > settleFrom);
 
   const ids = Object.fromEntries(FEED_ENTITIES.map((entity) => [entity, new Set<string>()])) as Record<
     FeedEntity,
@@ -95,13 +77,11 @@ export async function readFeed(
 
   const last = page.at(-1);
   const lastSeq = last ? Number(last.seq) : since;
-  const cursor = firstUnsettled ? Math.max(since, Number(firstUnsettled.seq) - 1) : lastSeq;
 
   return {
     ids: Object.fromEntries(FEED_ENTITIES.map((entity) => [entity, [...ids[entity]]])) as Record<FeedEntity, string[]>,
-    cursor,
-    // A held-back cursor would return the same unsettled rows again; stop until they settle.
-    hasMore: !firstUnsettled && rows.length > limit,
+    cursor: lastSeq,
+    hasMore: rows.length > limit,
   };
 }
 
