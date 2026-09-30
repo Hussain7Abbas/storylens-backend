@@ -1,11 +1,13 @@
-import type { PrismaClient, Replacement } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import {
   KeywordPlain,
   MatchingType,
   ReplacementPlain,
 } from '@/lib/db';
 import { Elysia, t } from 'elysia';
-import { paginationSchema, sortingSchema } from '@/schemas/common';
+import { paginationSchema, sortingSchema, staleWriteSchema } from '@/schemas/common';
+import { assertNotStale, compareAndSwap } from '@/lib/sync/precondition';
+import { createWithReplay, findReplay } from '@/lib/sync/replay';
 import { assertOwnsResource, authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
@@ -16,6 +18,15 @@ import { orderByIds, queryWeightedSearchIds } from '@/utils/weighted-search';
 const replacementInclude = {
   keyword: true,
 } as const;
+
+const replacementShape = t.Composite([
+  ReplacementPlain,
+  t.Object({
+    keyword: t.Nullable(KeywordPlain),
+  }),
+]);
+
+type Translate = ({ en, ar }: { en: string; ar: string }) => string;
 
 export const replacements = new Elysia({
   prefix: '/replacements',
@@ -134,6 +145,7 @@ export const replacements = new Elysia({
       if (!replacement) {
         throw new HttpError({
           statusCode: 404,
+          code: 'NOT_FOUND',
           message: t({
             en: 'Replacement not found',
             ar: 'البديل غير موجود',
@@ -158,99 +170,122 @@ export const replacements = new Elysia({
     },
   )
 
-  // Create replacement (readers and moderators)
+  // Create replacement (readers and moderators). The client sends the ID, so a replay
+  // returns the same row without rewriting chains again.
   .post(
     '/',
     async ({ t, prisma, body, authedUser }) => {
+      const findReplacement = () =>
+        prisma.replacement.findUnique({ where: { id: body.id }, include: replacementInclude });
+      const isReplay = (row: { createdById: string | null; novelId: string }) =>
+        row.createdById === authedUser.id && row.novelId === body.novelId;
+
+      const replay = await findReplay(findReplacement, isReplay, t);
+      if (replay) return replay;
+
       const sanitizedBody = sanitizeObject(body);
-      await validateReplacement(sanitizedBody, prisma, t, 'create');
-      const keyword = await checkChainReplacement(sanitizedBody, prisma);
+      const novel = await prisma.novel.findUnique({ where: { id: sanitizedBody.novelId }, select: { id: true } });
+      if (!novel) {
+        throw new HttpError({
+          statusCode: 404,
+          code: 'PARENT_NOT_FOUND',
+          message: t({ en: 'Novel not found', ar: 'الرواية غير موجودة' }),
+        });
+      }
+      await validateReplacement({ ...sanitizedBody, exceptId: body.id }, prisma, t);
 
-      const replacement = await prisma.replacement.create({
-        data: {
-          novelId: sanitizedBody.novelId,
-          from: sanitizedBody.from,
-          to: sanitizedBody.to,
-          matchingType: sanitizedBody.matchingType ?? 'FULL',
-          keywordId: keyword?.id,
-          createdById: authedUser.id,
-        },
-        include: {
-          keyword: true,
-        },
-      });
-
-      return replacement;
+      return createWithReplay(
+        () =>
+          prisma.$transaction(async (tx) => {
+            const keyword = await rewriteChain(sanitizedBody, tx);
+            return tx.replacement.create({
+              data: {
+                id: body.id,
+                novelId: sanitizedBody.novelId,
+                from: sanitizedBody.from,
+                to: sanitizedBody.to,
+                matchingType: sanitizedBody.matchingType ?? 'FULL',
+                keywordId: keyword?.id,
+                createdById: authedUser.id,
+              },
+              include: replacementInclude,
+            });
+          }),
+        findReplacement,
+        isReplay,
+        t,
+      );
     },
     {
       body: t.Object({
+        id: t.String({ format: 'uuid' }),
         novelId: t.String({ format: 'uuid' }),
         from: t.String({ minLength: 1 }),
         to: t.String({ minLength: 1 }),
         matchingType: t.Optional(MatchingType),
       }),
       response: {
-        200: t.Composite([
-          ReplacementPlain,
-          t.Object({
-            keyword: t.Nullable(KeywordPlain),
-          }),
-        ]),
+        200: replacementShape,
       },
     },
   )
 
-  // Update replacement (own for readers, any for moderators)
+  // Update replacement (own for readers, any for moderators). Partial: rules are checked
+  // against the stored row merged with the sent fields.
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body, authedUser }) => {
-      const sanitizedBody = sanitizeObject({ ...body, id });
-      const existingReplacement = await validateReplacement(
-        sanitizedBody,
-        prisma,
+      const existing = await prisma.replacement.findUnique({ where: { id } });
+      if (!existing) throw replacementNotFound(t);
+
+      assertOwnsResource(existing.createdById, authedUser);
+      await assertNotStale(
+        existing,
+        body.baseUpdatedAt,
+        () => prisma.replacement.findUniqueOrThrow({ where: { id }, include: replacementInclude }),
         t,
-        'update',
       );
-      assertOwnsResource(existingReplacement?.createdById, authedUser);
-      const keyword = await checkChainReplacement(sanitizedBody, prisma);
 
-      const replacement = await prisma.replacement.update({
-        where: { id },
-        data: {
-          from: sanitizedBody.from,
-          to: sanitizedBody.to,
-          matchingType: sanitizedBody.matchingType,
-          keywordId: keyword?.id,
-        },
-        include: {
-          keyword: true,
-        },
-      });
+      const sanitizedBody = sanitizeObject(body);
+      const merged = {
+        novelId: existing.novelId,
+        from: sanitizedBody.from ?? existing.from,
+        to: sanitizedBody.to ?? existing.to,
+      };
+      await validateReplacement({ ...merged, exceptId: id }, prisma, t);
 
-      return replacement;
+      return compareAndSwap(() => prisma.$transaction(async (tx) => {
+        const keyword = await rewriteChain(merged, tx);
+        return tx.replacement.update({
+          where: { id, updatedAt: existing.updatedAt },
+          data: {
+            from: sanitizedBody.from,
+            to: sanitizedBody.to,
+            matchingType: sanitizedBody.matchingType,
+            keywordId: keyword?.id ?? null,
+          },
+          include: replacementInclude,
+        });
+      }), () => prisma.replacement.findUniqueOrThrow({ where: { id }, include: replacementInclude }), t);
     },
     {
       params: t.Object({
         id: t.String({ format: 'uuid' }),
       }),
       body: t.Object({
-        novelId: t.String({ format: 'uuid' }),
-        from: t.String({ minLength: 1 }),
-        to: t.String({ minLength: 1 }),
-        matchingType: MatchingType,
+        baseUpdatedAt: t.String({ format: 'date-time' }),
+        from: t.Optional(t.String({ minLength: 1 })),
+        to: t.Optional(t.String({ minLength: 1 })),
+        matchingType: t.Optional(MatchingType),
       }),
       response: {
-        200: t.Composite([
-          ReplacementPlain,
-          t.Object({
-            keyword: t.Nullable(KeywordPlain),
-          }),
-        ]),
+        200: replacementShape,
+        409: staleWriteSchema(replacementShape),
       },
     },
   )
 
-  // Delete replacement (own for readers, any for moderators)
+  // Delete replacement (own for readers, any for moderators); unconditional
   .delete(
     '/:id',
     async ({ t, prisma, params: { id }, authedUser }) => {
@@ -258,15 +293,7 @@ export const replacements = new Elysia({
         where: { id },
       });
 
-      if (!existingReplacement) {
-        throw new HttpError({
-          statusCode: 404,
-          message: t({
-            en: 'Replacement not found',
-            ar: 'البديل غير موجود',
-          }),
-        });
-      }
+      if (!existingReplacement) throw replacementNotFound(t);
 
       assertOwnsResource(existingReplacement.createdById, authedUser);
 
@@ -286,40 +313,35 @@ export const replacements = new Elysia({
     },
   );
 
+function replacementNotFound(t: Translate): HttpError {
+  return new HttpError({
+    statusCode: 404,
+    code: 'NOT_FOUND',
+    message: t({
+      en: 'Replacement not found',
+      ar: 'البديل غير موجود',
+    }),
+  });
+}
+
+/** `from` is unique per novel, and no pair may replace in both directions. */
 async function validateReplacement(
-  body: { id?: string; from: string; to: string; novelId: string },
+  body: { exceptId: string; from: string; to: string; novelId: string },
   prisma: PrismaClient,
-  t: ({ en, ar }: { en: string; ar: string }) => string,
-  mode: 'create' | 'update',
-): Promise<Replacement | null> {
-  let currentReplacement: Replacement | null = null;
-
-  if (mode === 'update') {
-    currentReplacement = await prisma.replacement.findUnique({
-      where: { id: body.id },
-    });
-
-    if (!currentReplacement) {
-      throw new HttpError({
-        statusCode: 404,
-        message: t({
-          en: 'Replacement not found',
-          ar: 'البديل غير موجود',
-        }),
-      });
-    }
-  }
-
+  t: Translate,
+): Promise<void> {
   const existingReplacement = await prisma.replacement.findFirst({
     where: {
       from: body.from,
       novelId: body.novelId,
-      ...(mode === 'update' && body.id ? { id: { not: body.id } } : {}),
+      id: { not: body.exceptId },
     },
   });
 
   if (existingReplacement) {
     throw new HttpError({
+      statusCode: 409,
+      code: 'REPLACEMENT_EXISTS',
       message: t({
         en: 'Replacement already exists for this keyword',
         ar: 'البديل موجود بالفعل لهذه الكلمة المفتاحية',
@@ -332,24 +354,29 @@ async function validateReplacement(
       from: body.to,
       to: body.from,
       novelId: body.novelId,
+      id: { not: body.exceptId },
     },
   });
 
   if (bidirectionalReplacement) {
     throw new HttpError({
+      statusCode: 400,
+      code: 'REPLACEMENT_BIDIRECTIONAL',
       message: t({
         en: 'There is a bidirectional replacement',
         ar: 'هناك بديل متبادل',
       }),
     });
   }
-
-  return currentReplacement;
 }
 
-async function checkChainReplacement(
+/**
+ * Chain rewrite: replacements whose `to` is this one's `from` now point to its `to`.
+ * Returns the keyword named `to`, which the replacement links to.
+ */
+async function rewriteChain(
   body: { from: string; to: string; novelId: string },
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
 ) {
   const keyword = await prisma.keyword.findFirst({
     where: {
@@ -358,25 +385,16 @@ async function checkChainReplacement(
     },
   });
 
-  const chainReplacement = await prisma.replacement.findMany({
+  await prisma.replacement.updateMany({
     where: {
       to: body.from,
       novelId: body.novelId,
     },
+    data: {
+      to: body.to,
+      keywordId: keyword?.id ?? null,
+    },
   });
-
-  if (chainReplacement.length > 0) {
-    await prisma.replacement.updateMany({
-      where: {
-        to: body.from,
-        novelId: body.novelId,
-      },
-      data: {
-        to: body.to,
-        keywordId: keyword?.id,
-      },
-    });
-  }
 
   return keyword;
 }

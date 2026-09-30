@@ -84,7 +84,10 @@ describe('permission catalog', () => {
     const statuses = await Promise.all(
       protectedRoutes.map(async (route) => {
         const path = route.path.replace(/:[^/]+/g, '00000000-0000-4000-8000-000000000000');
-        const response = await app.handle(new Request(`http://localhost${path}`, { method: route.method }));
+        const response = await app.handle(new Request(`http://localhost${path}`, {
+          method: route.method,
+          headers: { 'X-Client-Version': 'extension/3.2.2' },
+        }));
         return `${route.method} ${route.path} ${response.status}`;
       }),
     );

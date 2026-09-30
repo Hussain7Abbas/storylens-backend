@@ -4,6 +4,7 @@ import { adminApi } from "./routes/admin";
 import { betterAuthRoutes } from "./routes/better-auth";
 import { health } from "./routes/health";
 import { userApi } from "./routes/user";
+import { toPrismaHttpError } from "./lib/sync/prisma-errors";
 import { errorSchema } from "./schemas/common";
 import { AuthError, HttpError } from "./utils/errors";
 
@@ -26,7 +27,26 @@ export const app = new Elysia()
 				message: error.message,
 			});
 
-			return status(error.statusCode, { message: error.message });
+			return status(error.statusCode, {
+				message: error.message,
+				...(error.errorCode ? { code: error.errorCode } : {}),
+				...error.details,
+			});
+		}
+
+		// Unique races and rows removed mid-request are expected under concurrent sync,
+		// so they answer with a status the client can classify instead of 500.
+		const prismaError = toPrismaHttpError(error);
+		if (prismaError) {
+			logError({
+				method: request.method,
+				path,
+				code,
+				status: prismaError.statusCode,
+				message: error instanceof Error ? error.message : String(error),
+			});
+
+			return status(prismaError.statusCode, { message: prismaError.message, code: prismaError.errorCode });
 		}
 
 		if (code === "AuthError") {

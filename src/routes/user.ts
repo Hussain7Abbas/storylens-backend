@@ -11,6 +11,7 @@ import { keywords } from './keywords';
 import { keywordsChapters } from './keywords-chapters';
 import { novels } from './novels';
 import { replacements } from './replacements';
+import { sync } from './sync';
 import { websiteNovelBiases } from './website-novel-biases';
 import { websiteSelectors } from './website-selectors';
 
@@ -32,4 +33,5 @@ export const userApi = new Elysia({ prefix: '/api/user' })
   .use(keywordCategories)
   .use(keywordNatures)
   .use(files)
-  .use(ai);
+  .use(ai)
+  .use(sync);

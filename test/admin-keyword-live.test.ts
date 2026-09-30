@@ -2,6 +2,7 @@ import { expect, it } from 'bun:test';
 import { prisma } from '@/lib/db';
 import { createSessionToken } from '@/lib/auth/session';
 import { app } from '@/server';
+import { syncPermissions } from '@/lib/permissions';
 
 const live = process.env.STORYLENS_LIVE_DB_TEST === '1' ? it : it.skip;
 
@@ -10,6 +11,7 @@ live('admin keyword merges and chapter ranges stay safe in PostgreSQL', async ()
   let userId: string | undefined;
   let novelId: string | undefined;
   try {
+    await syncPermissions(prisma, app.routes);
     const role = await prisma.role.findUniqueOrThrow({ where: { slug: 'super-admin' } });
     const user = await prisma.user.create({
       data: {
@@ -43,7 +45,7 @@ live('admin keyword merges and chapter ranges stay safe in PostgreSQL', async ()
 
     const target = await makeKeyword(`Target ${marker}`);
     const alias = await prisma.keywordAlias.create({
-      data: { keywordId: target.id, name: 'لقب تجريبي', nameAr: 'لقب تجريبي', createdById: user.id },
+      data: { keywordId: target.id, nameAr: 'لقب تجريبي', createdById: user.id },
     });
     const first = await makeKeyword(`First ${marker}`);
     const second = await makeKeyword(`Second ${marker}`);
@@ -56,11 +58,11 @@ live('admin keyword merges and chapter ranges stay safe in PostgreSQL', async ()
 
     const dedupeTarget = await makeKeyword(`Dedupe target ${marker}`);
     await prisma.keywordAlias.create({
-      data: { keywordId: dedupeTarget.id, name: 'Alice', nameAr: 'أليس', nameEn: 'Alice', createdById: user.id },
+      data: { keywordId: dedupeTarget.id, nameAr: 'أليس', nameEn: 'Alice', createdById: user.id },
     });
     const source = await makeKeyword(`Third ${marker}`);
     await prisma.keywordAlias.create({
-      data: { keywordId: source.id, name: 'أليس', nameAr: 'أليس', nameEn: 'Alyss', createdById: user.id },
+      data: { keywordId: source.id, nameAr: 'أليس', nameEn: 'Alyss', createdById: user.id },
     });
     const merged = await request('POST', `/keywords/${source.id}/alias`, { targetId: dedupeTarget.id });
     expect(merged.status).toBe(200);
@@ -68,22 +70,22 @@ live('admin keyword merges and chapter ranges stay safe in PostgreSQL', async ()
     expect(await prisma.keywordAlias.count({ where: { keywordId: dedupeTarget.id, nameAr: 'أليس' } })).toBe(1);
 
     const twinAlias = await prisma.keywordAlias.create({
-      data: { keywordId: dedupeTarget.id, name: 'Twin', nameEn: 'Twin', createdById: user.id },
+      data: { keywordId: dedupeTarget.id, nameEn: 'Twin', createdById: user.id },
     });
     const twinSource = await makeKeyword(`Twin source ${marker}`);
     await prisma.keywordAlias.create({
-      data: { keywordId: twinSource.id, name: 'Twin', nameEn: 'Twin', nameAr: 'توأم', createdById: user.id },
+      data: { keywordId: twinSource.id, nameEn: 'Twin', nameAr: 'توأم', createdById: user.id },
     });
     const twinMerge = await request('POST', `/keywords/${twinSource.id}/alias`, { targetId: dedupeTarget.id });
     expect(twinMerge.status).toBe(200);
     expect((await prisma.keywordAlias.findUniqueOrThrow({ where: { id: twinAlias.id } })).nameAr).toBe('توأم');
     const otherTwin = await makeKeyword(`Other twin ${marker}`);
     await prisma.keywordAlias.create({
-      data: { keywordId: otherTwin.id, name: 'Twin', nameEn: 'Twin', nameAr: 'توأمان', createdById: user.id },
+      data: { keywordId: otherTwin.id, nameEn: 'Twin', nameAr: 'توأمان', createdById: user.id },
     });
     const otherTwinMerge = await request('POST', `/keywords/${otherTwin.id}/alias`, { targetId: dedupeTarget.id });
     expect(otherTwinMerge.status).toBe(200);
-    expect(await prisma.keywordAlias.findFirst({ where: { keywordId: dedupeTarget.id, name: 'توأمان' } })).not.toBeNull();
+    expect(await prisma.keywordAlias.findFirst({ where: { keywordId: dedupeTarget.id, nameAr: 'توأمان' } })).not.toBeNull();
 
     const guarded = await makeKeyword(`Guarded ${marker}`);
     await prisma.keywordVersion.create({ data: { keywordId: guarded.id, startingChapter: 10, createdById: user.id } });

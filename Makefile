@@ -1,4 +1,4 @@
-.PHONY: help install dev build start typecheck test deprecations \
+.PHONY: help install dev build start typecheck test test-live deprecations \
 	docker-up docker-down docker-logs \
 	db-generate db-migrate-dev db-migrate-deploy db-reset db-seed db-studio storage-seed setup \
 	pm2-start pm2-stop pm2-restart pm2-delete sync set-review-version seed-dashboard-admin
@@ -26,6 +26,7 @@ help:
 	@echo "  $(GREEN)start$(RESET)                run production build"
 	@echo "  $(GREEN)typecheck$(RESET)            TypeScript check"
 	@echo "  $(GREEN)test$(RESET)                 run tests"
+	@echo "  $(GREEN)test-live$(RESET)            migrate $(YELLOW)TEST_DATABASE_URL$(RESET) and run tests with the live-database ones"
 	@echo "  $(GREEN)deprecations$(RESET)         list deprecations; fail on expired or undated ones"
 	@echo "  $(GREEN)docker-up$(RESET)            start Postgres"
 	@echo "  $(GREEN)docker-down$(RESET)          stop Postgres"
@@ -66,6 +67,12 @@ typecheck:
 
 test:
 	@cd "$(ROOT)" && bun run test
+
+# Live tests (sync API, change feeds, migrations) need a disposable database; never point this at real data.
+test-live:
+	@test -n "$${TEST_DATABASE_URL:-}" || { echo "Set TEST_DATABASE_URL to a disposable Postgres database"; exit 1; }
+	@cd "$(ROOT)" && DATABASE_URL="$$TEST_DATABASE_URL" bunx prisma migrate deploy
+	@cd "$(ROOT)" && DATABASE_URL="$$TEST_DATABASE_URL" STORYLENS_LIVE_DB_TEST=1 bun run test
 
 deprecations:
 	@cd "$(ROOT)" && bun run deprecations

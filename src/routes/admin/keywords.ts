@@ -7,7 +7,7 @@ import { adminKeywordDetailSchema, keywordDetailInclude, styleBody } from '@/sch
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
-import { aliasNameColumns, aliasNames, languageSchema, nameField, scriptLanguage } from '@/utils/translation';
+import { languageSchema, nameField, scriptLanguage } from '@/utils/translation';
 import { assertStyleRefs, styleData } from './keyword-styles';
 import { lockKeywordVersions } from './version-ranges';
 
@@ -16,7 +16,7 @@ type Tx = Prisma.TransactionClient;
 const keywordInclude = {
   // The base version (chapter 0 onwards) holds the description shown next to the name.
   versions: { orderBy: { startingChapter: 'asc' }, take: 1, select: { description: true } },
-  aliases: { select: { name: true, nameAr: true, nameEn: true }, orderBy: { createdAt: 'asc' } },
+  aliases: { select: { nameAr: true, nameEn: true }, orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.KeywordInclude;
 
 type KeywordRow = Prisma.KeywordGetPayload<{ include: typeof keywordInclude }>;
@@ -38,7 +38,7 @@ function toKeyword({ versions, aliases, ...keyword }: KeywordRow) {
     nameEn: keyword.nameEn,
     description: versions[0]?.description ?? null,
     // Every name of each alias, translations included.
-    aliases: [...new Set(aliases.flatMap((alias) => [alias.name, ...Object.values(aliasNames(alias))]))].filter(
+    aliases: [...new Set(aliases.flatMap((alias) => [alias.nameAr, alias.nameEn]))].filter(
       (name): name is string => !!name,
     ),
   };
@@ -69,80 +69,66 @@ async function loadPair(tx: Tx, id: string, targetId: string) {
   return { source, target };
 }
 
+type AliasNameRow = { id: string; nameAr: string | null; nameEn: string | null };
+
+const NAME_COLUMNS = ['nameAr', 'nameEn'] as const;
+
+/** Names already used by `aliases` in each language (the per-keyword unique constraints). */
+function takenAliasNames(aliases: AliasNameRow[]) {
+  return {
+    nameAr: new Set(aliases.flatMap((alias) => (alias.nameAr ? [alias.nameAr] : []))),
+    nameEn: new Set(aliases.flatMap((alias) => (alias.nameEn ? [alias.nameEn] : []))),
+  };
+}
+
 /**
  * Moves what hangs off `source` (aliases, chapter links, replacements) onto
- * `target`, then deletes `source`. Same-name aliases combine compatible translations.
+ * `target`, then deletes `source`. An alias that shares a name in one language
+ * with a target alias fills the target alias's missing translation when the two
+ * agree; otherwise it moves with only the names the target does not have yet.
  */
-async function absorb(
-  tx: Tx,
-  source: { id: string; aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[] },
-  target: { id: string; aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[] },
-) {
-  const byName = new Map(target.aliases.map((alias) => [alias.name, alias]));
-  const represented = new Set(target.aliases.flatMap((alias) => [alias.name, ...Object.values(aliasNames(alias))]));
+async function absorb(tx: Tx, source: { id: string; aliases: AliasNameRow[] }, target: { id: string; aliases: AliasNameRow[] }) {
   for (const alias of source.aliases) {
-    const existing = byName.get(alias.name);
-    if (!existing) {
-      const distinctName = represented.has(alias.name)
-        ? Object.values(aliasNames(alias)).find((name) => name && !represented.has(name))
-        : alias.name;
-      if (!distinctName) continue;
-      const renamed = distinctName !== alias.name;
-      const columns = renamed ? aliasNameColumns(distinctName) : { nameAr: alias.nameAr, nameEn: alias.nameEn };
-      await tx.keywordAlias.update({
-        where: { id: alias.id },
-        data: { keywordId: target.id, ...(renamed ? { name: distinctName, ...columns } : {}) },
-      });
-      byName.set(distinctName, { ...alias, name: distinctName, ...columns });
-      represented.add(distinctName);
-      if (!renamed) Object.values(aliasNames(alias)).forEach((name) => name && represented.add(name));
-      continue;
-    }
-    const incomingNames = aliasNames(alias);
-    const existingNames = aliasNames(existing);
-    const conflictingNames = (['ar', 'en'] as const).flatMap((language) =>
-      incomingNames[language] && existingNames[language] && incomingNames[language] !== existingNames[language]
-        ? [incomingNames[language]]
-        : [],
+    const taken = takenAliasNames(target.aliases);
+    const existing = target.aliases.find((other) =>
+      NAME_COLUMNS.some((column) => alias[column] && other[column] === alias[column]),
     );
-    if (conflictingNames.length) {
-      // The primary name is taken, but a distinct translation can become the
-      // moved alias's primary name without losing either translation.
-      const distinctName = conflictingNames.find((name) => name && !represented.has(name));
-      if (distinctName) {
-        const columns = aliasNameColumns(distinctName);
-        await tx.keywordAlias.update({
-          where: { id: alias.id },
-          data: { keywordId: target.id, name: distinctName, ...columns },
-        });
-        byName.set(distinctName, { ...alias, name: distinctName, ...columns });
-        represented.add(distinctName);
+    const compatible =
+      existing && NAME_COLUMNS.every((column) => !alias[column] || !existing[column] || alias[column] === existing[column]);
+
+    if (existing && compatible) {
+      const names = {
+        nameAr: existing.nameAr ?? (alias.nameAr && !taken.nameAr.has(alias.nameAr) ? alias.nameAr : null),
+        nameEn: existing.nameEn ?? (alias.nameEn && !taken.nameEn.has(alias.nameEn) ? alias.nameEn : null),
+      };
+      if (names.nameAr !== existing.nameAr || names.nameEn !== existing.nameEn) {
+        await tx.keywordAlias.update({ where: { id: existing.id }, data: names });
+        Object.assign(existing, names);
       }
       continue;
     }
-    const nameAr = existingNames.ar ?? incomingNames.ar;
-    const nameEn = existingNames.en ?? incomingNames.en;
-    if (nameAr !== existing.nameAr || nameEn !== existing.nameEn) {
-      await tx.keywordAlias.update({ where: { id: existing.id }, data: { nameAr, nameEn } });
-      existing.nameAr = nameAr;
-      existing.nameEn = nameEn;
-      if (nameAr) represented.add(nameAr);
-      if (nameEn) represented.add(nameEn);
-    }
+
+    const names = {
+      nameAr: alias.nameAr && !taken.nameAr.has(alias.nameAr) ? alias.nameAr : null,
+      nameEn: alias.nameEn && !taken.nameEn.has(alias.nameEn) ? alias.nameEn : null,
+    };
+    if (!names.nameAr && !names.nameEn) continue;
+    await tx.keywordAlias.update({ where: { id: alias.id }, data: { keywordId: target.id, ...names } });
+    target.aliases.push({ ...alias, ...names });
   }
   await tx.keywordsChapters.updateMany({ where: { keywordId: source.id }, data: { keywordId: target.id } });
   await tx.replacement.updateMany({ where: { keywordId: source.id }, data: { keywordId: target.id } });
   await tx.keyword.delete({ where: { id: source.id } });
 }
 
-/** Adds the source keyword's names (either language) as aliases of the target. */
+/** Adds the source keyword's names (either language) as one alias of the target. */
 async function addNamesAsAliases(
   tx: Tx,
   target: {
     id: string;
     nameAr: string | null;
     nameEn: string | null;
-    aliases: { id: string; name: string; nameAr: string | null; nameEn: string | null }[];
+    aliases: AliasNameRow[];
   },
   source: {
     nameAr: string | null;
@@ -150,28 +136,25 @@ async function addNamesAsAliases(
     versions: { description: string | null; categoryId: string | null; natureId: string | null; imageId: string | null }[];
   },
 ) {
-  const taken = new Set([
-    target.nameAr,
-    target.nameEn,
-    ...target.aliases.flatMap((alias) => [alias.name, ...Object.values(aliasNames(alias))]),
-  ]);
+  const taken = takenAliasNames(target.aliases);
+  const free = (column: 'nameAr' | 'nameEn') => {
+    const name = source[column];
+    return name && name !== target[column] && !taken[column].has(name) ? name : null;
+  };
+  const names = { nameAr: free('nameAr'), nameEn: free('nameEn') };
+  if (!names.nameAr && !names.nameEn) return;
   const base = source.versions[0];
-  for (const name of [source.nameAr, source.nameEn]) {
-    if (!name || taken.has(name)) continue;
-    const alias = await tx.keywordAlias.create({
-      data: {
-        keywordId: target.id,
-        name,
-        ...aliasNameColumns(name),
-        description: base?.description ?? null,
-        categoryId: base?.categoryId ?? null,
-        natureId: base?.natureId ?? null,
-        imageId: base?.imageId ?? null,
-      },
-    });
-    target.aliases.push(alias);
-    taken.add(name);
-  }
+  const alias = await tx.keywordAlias.create({
+    data: {
+      keywordId: target.id,
+      ...names,
+      description: base?.description ?? null,
+      categoryId: base?.categoryId ?? null,
+      natureId: base?.natureId ?? null,
+      imageId: base?.imageId ?? null,
+    },
+  });
+  target.aliases.push(alias);
 }
 
 const pairBody = t.Object({ targetId: t.String({ format: 'uuid' }) });
@@ -212,7 +195,6 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
                   aliases: {
                     some: {
                       OR: [
-                        { name: { contains: search, mode: 'insensitive' } },
                         { nameAr: { contains: search, mode: 'insensitive' } },
                         { nameEn: { contains: search, mode: 'insensitive' } },
                       ],
@@ -414,12 +396,16 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         }
         // Older keywords keep English names in `nameAr`, so the script decides the language.
         const language = scriptLanguage(name) ?? (source.nameAr ? 'ar' : 'en');
-        const names = aliasNames(alias);
-        const current = names[language];
+        const column = nameField(language);
+        const current = alias[column];
         if (current && current !== name) {
-          conflict(`The alias “${alias.name}” already has the ${language === 'ar' ? 'Arabic' : 'English'} name “${current}”`);
+          conflict(
+            `The alias “${alias.nameAr ?? alias.nameEn}” already has the ${language === 'ar' ? 'Arabic' : 'English'} name “${current}”`,
+          );
         }
-        names[language] = name;
+        if (alias.keyword.aliases.some((other) => other.id !== alias.id && other[column] === name)) {
+          conflict(`Another alias of this keyword is already named “${name}”`);
+        }
 
         const base = source.versions[0];
         const sourceNewer = !!base && base.updatedAt > alias.updatedAt;
@@ -428,8 +414,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         await tx.keywordAlias.update({
           where: { id: alias.id },
           data: {
-            nameAr: names.ar,
-            nameEn: names.en,
+            [column]: name,
             imageId: mergeShared(alias.imageId, base?.imageId),
             categoryId: mergeShared(alias.categoryId, base?.categoryId),
             natureId: mergeShared(alias.natureId, base?.natureId),

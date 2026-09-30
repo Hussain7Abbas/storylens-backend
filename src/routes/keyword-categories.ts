@@ -1,6 +1,17 @@
 import { KeywordCategoryPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
-import { paginationSchema, sortingSchema } from '@/schemas/common';
+import type { PrismaClient } from '@prisma/client';
+import { paginationSchema, sortingSchema, staleWriteSchema } from '@/schemas/common';
+import {
+  assertLookupHasName,
+  cleanLookupName,
+  isLookupReplay,
+  type LookupNames,
+  lookupNameFilters,
+  lookupNameTaken,
+} from '@/lib/sync/lookups';
+import { assertNotStale, compareAndSwap } from '@/lib/sync/precondition';
+import { createWithReplay, findReplay } from '@/lib/sync/replay';
 import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
@@ -65,6 +76,7 @@ export const keywordCategories = new Elysia({
       if (!category) {
         throw new HttpError({
           statusCode: 404,
+          code: 'NOT_FOUND',
           message: t({
             en: 'Category not found',
             ar: 'الفئة غير موجودة',
@@ -91,41 +103,41 @@ export const keywordCategories = new Elysia({
     },
   )
 
-  // Create keyword category (moderator by default)
+  // Create keyword category (moderator by default). The client sends the ID, so a replay
+  // with the same names and color returns the same row.
   .post(
     '/',
     async ({ t, prisma, body }) => {
-      // Check if category name already exists
-      const existingCategory = await prisma.keywordCategory.findFirst({
-        where: {
-          nameEn: body.nameEn,
-        },
-      });
+      const findCategory = () => prisma.keywordCategory.findUnique({ where: { id: body.id } });
+      const isReplay = (row: CategoryRow) => isLookupReplay(row, body);
 
-      if (existingCategory) {
-        throw new HttpError({
-          message: t({
-            en: 'Category name already exists',
-            ar: 'اسم الفئة موجود بالفعل',
+      const replay = await findReplay(findCategory, isReplay, t);
+      if (replay) return replay;
+
+      const names = { nameAr: cleanLookupName(body.nameAr) ?? null, nameEn: cleanLookupName(body.nameEn) ?? null };
+      assertLookupHasName(names, t);
+      await assertNamesFree(prisma, t, names, body.id);
+
+      return createWithReplay(
+        () =>
+          prisma.keywordCategory.create({
+            data: {
+              id: body.id,
+              ...names,
+              color: body.color,
+              description: body.description,
+            },
           }),
-        });
-      }
-
-      const category = await prisma.keywordCategory.create({
-        data: {
-          nameEn: body.nameEn,
-          nameAr: body.nameAr,
-          color: body.color,
-          description: body.description,
-        },
-      });
-
-      return category;
+        findCategory,
+        isReplay,
+        t,
+      );
     },
     {
       body: t.Object({
-        nameEn: t.Optional(t.String()),
-        nameAr: t.Optional(t.String()),
+        id: t.String({ format: 'uuid' }),
+        nameEn: t.Optional(t.Nullable(t.String())),
+        nameAr: t.Optional(t.Nullable(t.String())),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
         description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
@@ -135,99 +147,82 @@ export const keywordCategories = new Elysia({
     },
   )
 
-  // Update keyword category (moderator by default)
+  // Update keyword category (moderator by default). Partial: only sent fields change.
   .put(
     '/:id',
     async ({ t, prisma, params: { id }, body }) => {
-      const existingCategory = await prisma.keywordCategory.findUnique({
-        where: { id },
-      });
+      const existing = await prisma.keywordCategory.findUnique({ where: { id } });
+      if (!existing) throw notFound(t);
 
-      if (!existingCategory) {
-        throw new HttpError({
-          statusCode: 404,
-          message: t({
-            en: 'Category not found',
-            ar: 'الفئة غير موجودة',
-          }),
-        });
-      }
+      await assertNotStale(existing, body.baseUpdatedAt, () => prisma.keywordCategory.findUniqueOrThrow({ where: { id } }), t);
 
-      // If changing nameEn, check for conflicts
-      if (body.nameEn && body.nameEn !== existingCategory.nameEn) {
-        const conflictCategory = await prisma.keywordCategory.findFirst({
-          where: {
-            nameEn: body.nameEn,
-            id: { not: id },
-          },
-        });
+      const names = { nameAr: cleanLookupName(body.nameAr), nameEn: cleanLookupName(body.nameEn) };
+      assertLookupHasName(
+        {
+          nameAr: names.nameAr === undefined ? existing.nameAr : names.nameAr,
+          nameEn: names.nameEn === undefined ? existing.nameEn : names.nameEn,
+        },
+        t,
+      );
+      await assertNamesFree(
+        prisma,
+        t,
+        {
+          nameAr: names.nameAr !== existing.nameAr ? names.nameAr : undefined,
+          nameEn: names.nameEn !== existing.nameEn ? names.nameEn : undefined,
+        },
+        id,
+      );
 
-        if (conflictCategory) {
-          throw new HttpError({
-            message: t({
-              en: 'Category name already exists',
-              ar: 'اسم الفئة موجود بالفعل',
-            }),
-          });
-        }
-      }
-
-      const category = await prisma.keywordCategory.update({
-        where: { id },
+      return compareAndSwap(() => prisma.keywordCategory.update({
+        where: { id, updatedAt: existing.updatedAt },
         data: {
-          nameEn: body.nameEn,
-          nameAr: body.nameAr,
+          ...names,
           color: body.color,
           description: body.description,
         },
-      });
-
-      return category;
+      }), () => prisma.keywordCategory.findUniqueOrThrow({ where: { id } }), t);
     },
     {
       params: t.Object({
         id: t.String({ format: 'uuid' }),
       }),
       body: t.Object({
-        nameEn: t.Optional(t.String()),
-        nameAr: t.Optional(t.String()),
-        color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
+        baseUpdatedAt: t.String({ format: 'date-time' }),
+        nameEn: t.Optional(t.Nullable(t.String())),
+        nameAr: t.Optional(t.Nullable(t.String())),
+        color: t.Optional(t.String({ pattern: '^#[0-9A-Fa-f]{6}$' })),
         description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: {
         200: KeywordCategoryPlain,
+        409: staleWriteSchema(KeywordCategoryPlain),
       },
     },
   )
 
-  // Delete keyword category (moderator by default)
+  // Delete keyword category (moderator by default); refused while a version or alias uses it
   .delete(
     '/:id',
     async ({ t, prisma, params: { id } }) => {
-      const existingCategory = await prisma.keywordCategory.findUnique({
+      const existing = await prisma.keywordCategory.findUnique({
         where: { id },
         include: {
           _count: {
             select: {
               keywordVersions: true,
+              keywordAliases: true,
             },
           },
         },
       });
 
-      if (!existingCategory) {
-        throw new HttpError({
-          statusCode: 404,
-          message: t({
-            en: 'Category not found',
-            ar: 'الفئة غير موجودة',
-          }),
-        });
-      }
+      if (!existing) throw notFound(t);
 
-      // Check if category has keyword versions
-      if (existingCategory._count.keywordVersions > 0) {
+      if (existing._count.keywordVersions > 0 || existing._count.keywordAliases > 0) {
         throw new HttpError({
+          statusCode: 400,
+          code: 'CATEGORY_IN_USE',
           message: t({
             en: 'Cannot delete category with keywords',
             ar: 'لا يمكن حذف فئة تحتوي على كلمات مفتاحية',
@@ -239,7 +234,8 @@ export const keywordCategories = new Elysia({
         where: { id },
       });
 
-      return existingCategory;
+      const { _count: _usage, ...category } = existing;
+      return category;
     },
     {
       params: t.Object({
@@ -250,3 +246,29 @@ export const keywordCategories = new Elysia({
       },
     },
   );
+
+type CategoryRow = Awaited<ReturnType<PrismaClient['keywordCategory']['findUniqueOrThrow']>>;
+type Translate = (messages: { en: string; ar: string }) => string;
+
+function notFound(t: Translate): HttpError {
+  return new HttpError({
+    statusCode: 404,
+    code: 'NOT_FOUND',
+    message: t({ en: 'Category not found', ar: 'الفئة غير موجودة' }),
+  });
+}
+
+/** Names are unique in each language they are given in; `exceptId` is the row being saved. */
+async function assertNamesFree(
+  prisma: PrismaClient,
+  t: Translate,
+  names: LookupNames,
+  exceptId: string,
+): Promise<void> {
+  const filters = lookupNameFilters(names);
+  if (!filters.length) return;
+  const conflict = await prisma.keywordCategory.findFirst({ where: { id: { not: exceptId }, OR: filters } });
+  if (conflict) {
+    throw lookupNameTaken(t({ en: 'Category name already exists', ar: 'اسم الفئة موجود بالفعل' }));
+  }
+}

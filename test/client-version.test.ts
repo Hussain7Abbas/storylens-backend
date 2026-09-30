@@ -73,4 +73,10 @@ describe('outdated clients', () => {
     const health = await request('/health', { 'x-client-version': 'extension/0.9.0' });
     expect(health.status).toBe(200);
   });
+
+  it('refuses unversioned sync writes before body validation', async () => {
+    const response = await app.handle(new Request('http://localhost/api/user/keywords', { method: 'POST' }));
+    expect(response.status).toBe(426);
+    expect(response.headers.get('x-min-client-version')).toBe(MIN_CLIENT_VERSIONS.extension);
+  });
 });
