@@ -194,6 +194,27 @@ describe('stale writes', () => {
 });
 
 describe('partial updates and clears', () => {
+  live('defaults Arabic character variant matching on and persists strict keyword and alias settings', async () => {
+    const { result } = await createKeyword(owner, `Arabic match ${marker}`, { nameAr: `أمل ${marker}` });
+    expect(result.status).toBe(200);
+    expect(result.body.fuzzyMatchArabicCharacters).toBe(true);
+
+    const strict = await call<Row>(owner, 'PUT', `/keywords/${result.body.id}`, {
+      baseUpdatedAt: result.body.updatedAt,
+      fuzzyMatchArabicCharacters: false,
+    });
+    expect(strict.status).toBe(200);
+    expect(strict.body.fuzzyMatchArabicCharacters).toBe(false);
+
+    const alias = await call<Row>(owner, 'POST', '/keyword-aliases', {
+      id: crypto.randomUUID(), keywordId: result.body.id, nameAr: `إمل ${marker}`,
+      fuzzyMatchArabicCharacters: false,
+    });
+    expect(alias.status).toBe(200);
+    expect(alias.body.fuzzyMatchArabicCharacters).toBe(false);
+    expect((await prisma.keywordAlias.findUniqueOrThrow({ where: { id: alias.body.id } })).fuzzyMatchArabicCharacters).toBe(false);
+  });
+
   live('updates only the sent replacement fields and checks the stored from', async () => {
     const created = await call<Row>(owner, 'POST', '/replacements', {
       id: crypto.randomUUID(),

@@ -287,6 +287,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 								id: body.id,
 								...names,
 								matchingType: sanitizedBody.matchingType ?? "FULL",
+								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters ?? true,
 								novelId,
 								createdById: authedUser.id,
 							},
@@ -325,6 +326,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				...translatedNameBody,
 				description: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
+				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 				novelId: t.String({ format: "uuid" }),
 				categoryId: t.String({ format: "uuid" }),
 				natureId: t.String({ format: "uuid" }),
@@ -378,6 +380,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				data: {
 					...names,
 					matchingType: sanitizedBody.matchingType,
+					fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
 				},
 				include: keywordInclude,
 			}), () => prisma.keyword.findUniqueOrThrow({ where: { id }, include: keywordInclude }), t);
@@ -392,6 +395,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				baseUpdatedAt: t.String({ format: "date-time" }),
 				...translatedNameBody,
 				matchingType: t.Optional(MatchingType),
+				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 			}),
 			response: {
 				200: keywordWithChildrenShape,
