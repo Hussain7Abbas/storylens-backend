@@ -1,7 +1,7 @@
 {
  "name": "storylens-backend",
  "private": true,
- "version": "3.3.0",
+ "version": "3.3.1",
  "license": "PolyForm-Noncommercial-1.0.0",
  "type": "module",
  "scripts": {
@@ -19,7 +19,8 @@
   "db:studio": "bunx prisma studio",
   "storage:seed": "bun run storage-seed/main.ts",
   "review-version:set": "bun run src/scripts/set_review_version.ts",
-  "dashboard-admin:seed": "bun run src/scripts/seed_dashboard_admin.ts"
+  "dashboard-admin:seed": "bun run src/scripts/seed_dashboard_admin.ts",
+  "dashboard:notify": "bun run src/scripts/dispatch_dashboard_deploy.ts"
  },
  "dependencies": {
   "@elysiajs/bearer": "^1.4.1",

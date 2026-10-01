@@ -1,7 +1,7 @@
 .PHONY: help install dev build start typecheck test test-live deprecations \
 	docker-up docker-down docker-logs \
 	db-generate db-migrate-dev db-migrate-deploy db-reset db-seed db-studio storage-seed setup \
-	pm2-start pm2-stop pm2-restart pm2-delete sync set-review-version seed-dashboard-admin
+	pm2-start pm2-stop pm2-restart pm2-delete sync set-review-version seed-dashboard-admin notify-dashboard
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ECOSYSTEM := $(ROOT)/ecosystem.config.cjs
@@ -46,6 +46,7 @@ help:
 	@echo "  $(GREEN)pm2-delete$(RESET)           remove API from PM2"
 	@echo "  $(GREEN)set-review-version$(RESET)   set Review_Version config ($(YELLOW)VERSION=x.y.z$(RESET))"
 	@echo "  $(GREEN)seed-dashboard-admin$(RESET) create or reset the dashboard super admin from DASHBOARD_ADMIN_*"
+	@echo "  $(GREEN)notify-dashboard$(RESET)     trigger the dashboard deploy workflow ($(YELLOW)DASHBOARD_DISPATCH_TOKEN$(RESET))"
 	@echo ""
 
 install:
@@ -113,6 +114,9 @@ set-review-version:
 
 seed-dashboard-admin:
 	@cd "$(ROOT)" && bun run dashboard-admin:seed
+
+notify-dashboard:
+	@cd "$(ROOT)" && bun run dashboard:notify
 
 pm2-start:
 	@cd "$(ROOT)" && pm2 start "$(ECOSYSTEM)" --update-env && pm2 save

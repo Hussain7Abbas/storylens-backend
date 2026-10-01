@@ -30,5 +30,7 @@ export const env = createEnv({
     OPENROUTER_API_KEY: z.string().optional(),
     OPENROUTER_MODEL: z.string().optional(),
     CHROME_EXTENSION_ID: z.string().optional(),
+    // Fine-grained GitHub token (Contents: write on storylens-dashboard) used to deploy the dashboard after `make sync`.
+    DASHBOARD_DISPATCH_TOKEN: z.string().optional(),
   },
 });

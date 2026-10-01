@@ -36,9 +36,10 @@ export const fetchPublishedChromeVersion = async (extensionId: string): Promise<
 /**
  * Runs `make sync` outside the API's process tree. `make sync` stops this PM2 process,
  * so the background shell exits immediately and `make` is reparented away from the API.
+ * Only a successful sync triggers the dashboard deploy.
  */
 export const startDetachedSync = (): void => {
-  const child = spawn('/bin/sh', ['-c', 'nohup make sync >> sync.log 2>&1 &'], {
+  const child = spawn('/bin/sh', ['-c', "nohup sh -c 'make sync && make notify-dashboard' >> sync.log 2>&1 &"], {
     cwd: BACKEND_ROOT,
     detached: true,
     stdio: 'ignore',
