@@ -19,7 +19,8 @@
   "db:studio": "bunx prisma studio",
   "storage:seed": "bun run storage-seed/main.ts",
   "review-version:set": "bun run src/scripts/set_review_version.ts",
-  "dashboard-admin:seed": "bun run src/scripts/seed_dashboard_admin.ts"
+  "dashboard-admin:seed": "bun run src/scripts/seed_dashboard_admin.ts",
+  "dashboard:notify": "bun run src/scripts/dispatch_dashboard_deploy.ts"
  },
  "dependencies": {
   "@elysiajs/bearer": "^1.4.1",
