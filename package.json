@@ -1,7 +1,7 @@
 {
  "name": "storylens-backend",
  "private": true,
- "version": "3.3.1",
+ "version": "3.4.0",
  "license": "PolyForm-Noncommercial-1.0.0",
  "type": "module",
  "scripts": {
@@ -20,7 +20,10 @@
   "storage:seed": "bun run storage-seed/main.ts",
   "review-version:set": "bun run src/scripts/set_review_version.ts",
   "dashboard-admin:seed": "bun run src/scripts/seed_dashboard_admin.ts",
-  "dashboard:notify": "bun run src/scripts/dispatch_dashboard_deploy.ts"
+  "dashboard:notify": "bun run src/scripts/dispatch_dashboard_deploy.ts",
+  "lens:audit": "bun run src/scripts/lens_audit.ts",
+  "lens:grant-trial": "bun run src/scripts/grant_trial_gifts.ts",
+  "ai:smoke": "bun run src/scripts/ai_smoke.ts"
  },
  "dependencies": {
   "@elysiajs/bearer": "^1.4.1",

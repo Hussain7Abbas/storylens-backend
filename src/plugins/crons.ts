@@ -9,6 +9,7 @@ import {
   startDetachedSync,
 } from '@/lib/review-version';
 import { deleteFile } from '@/lib/storage';
+import { pruneAiUsage, sweepStuckActions } from '@/lib/ai/cloud/actions';
 import { pruneFeed } from '@/lib/sync/feed';
 
 const storageCleaner = elysiaCron({
@@ -74,7 +75,37 @@ const syncFeedPruner = elysiaCron({
   },
 });
 
+// Cloud AI actions left running by a restart are failed and refunded.
+const aiActionSweeper = elysiaCron({
+  name: 'ai-action-sweeper',
+  pattern: '*/5 * * * *',
+  run: async () => {
+    try {
+      const swept = await sweepStuckActions(prisma);
+      if (swept) console.log(`AI action sweeper refunded ${swept} stuck actions`);
+    } catch (error) {
+      console.error('AI action sweeper failed', error);
+    }
+  },
+});
+
+// Cloud AI usage rows are kept 400 days; the lens ledger keeps its labels.
+const aiUsagePruner = elysiaCron({
+  name: 'ai-usage-pruner',
+  pattern: '15 4 1 * *',
+  run: async () => {
+    try {
+      const pruned = await pruneAiUsage(prisma);
+      if (pruned) console.log(`AI usage pruner removed ${pruned} actions`);
+    } catch (error) {
+      console.error('AI usage pruner failed', error);
+    }
+  },
+});
+
 export const crons = new Elysia({ name: 'crons' })
   .use(storageCleaner)
   .use(reviewVersionWatcher)
-  .use(syncFeedPruner);
+  .use(syncFeedPruner)
+  .use(aiActionSweeper)
+  .use(aiUsagePruner);

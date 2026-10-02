@@ -10,6 +10,7 @@ console.log(
   `🔐 ${synced.total} permissions synced (${synced.created.length} new, ${synced.removed.length} removed)`,
 );
 
-app.listen(env.PORT, ({ url }) => {
+// Cloud AI requests stream heartbeats, but allow long silences anyway (Bun's default is 10 s).
+app.listen({ port: env.PORT, idleTimeout: 120 }, ({ url }) => {
   console.log(`🚀 Server is running at ${chalk.green(url)}`);
 });

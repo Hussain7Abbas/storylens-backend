@@ -4,6 +4,7 @@ import { MatchingType } from '@/lib/db';
 import { authorize } from '@/middleware/authorize';
 import { adminAliasSchema, styleBody, styleInclude } from '@/schemas/admin-keywords';
 import { setup } from '@/setup';
+import { cleanKeywordName } from '@/utils/arabic';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
 import { assertStyleRefs, styleData } from './keyword-styles';
@@ -22,7 +23,7 @@ function nameRequired(): never {
 
 /** A sent name, trimmed; blank or `null` clears it, `undefined` keeps it. */
 function cleanName(value: string | null | undefined): string | null | undefined {
-  return value === undefined ? undefined : value === null ? null : sanitize(value) || null;
+  return value === undefined ? undefined : value === null ? null : cleanKeywordName(sanitize(value));
 }
 
 /** Alias names are unique per keyword in each language. */

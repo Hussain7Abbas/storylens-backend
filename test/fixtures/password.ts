@@ -29,6 +29,9 @@ const fakePrisma = {
    const before = verifications.length; verifications = verifications.filter(v => !matches(v, where)); return { count: before - verifications.length };
   },
  },
+ session: {
+  deleteMany: async (args: {where: {userId: string; kind: string}}) => { writes.push({target: 'session', data: args.where}); return {count: 1}; },
+ },
  account: {
   findFirst: async () => ({ password: hashedPassword }),
   updateMany: async (args: { data: Record<string, unknown> }) => { writes.push({ target: 'account', data: args.data }); return { count: 1 }; },
@@ -90,7 +93,8 @@ describe('change password', () => {
  it('updates both password stores after the code is verified', async () => {
   await requestPassword();
   const response = await post('change-password/verify', { code: codeFrom(0) }); expect(response.status).toBe(200);
-  expect(writes.map(write => write.target)).toEqual(['user', 'account']);
+  expect(writes.map(write => write.target)).toEqual(['user', 'account', 'session']);
+  expect(writes.find(write => write.target === 'session')?.data).toMatchObject({userId: 'user-id', kind: 'web'});
   const [userWrite, accountWrite] = writes;
   expect(userWrite?.data.password).toBe(accountWrite?.data.password);
   expect(await bcrypt.compare('new-password', String(userWrite?.data.password))).toBe(true);

@@ -5,6 +5,7 @@ import { authorize } from '@/middleware/authorize';
 import { adminListQuery, pageArgs } from '@/schemas/admin';
 import { adminKeywordDetailSchema, keywordDetailInclude, styleBody } from '@/schemas/admin-keywords';
 import { setup } from '@/setup';
+import { cleanKeywordName, stripArabicDiacritics } from '@/utils/arabic';
 import { HttpError } from '@/utils/errors';
 import { sanitize } from '@/utils/sanitize';
 import { languageSchema, nameField, scriptLanguage } from '@/utils/translation';
@@ -170,7 +171,8 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
   .get(
     '/',
     async ({ prisma, query }) => {
-      const search = query.search?.trim();
+      // Names are stored without Arabic diacritics, so the search drops them too.
+      const search = query.search === undefined ? undefined : stripArabicDiacritics(String(query.search)).trim();
       const where: Prisma.KeywordWhereInput = {
         novelId: query.novelId,
         // `missing`: keywords that still need this language's name.
@@ -240,8 +242,8 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
       const novel = await prisma.novel.findUnique({ where: { id: body.novelId }, select: { id: true } });
       if (!novel) throw new HttpError({ statusCode: 404, message: 'Novel not found' });
       const names = {
-        nameAr: body.nameAr ? sanitize(body.nameAr) || null : null,
-        nameEn: body.nameEn ? sanitize(body.nameEn) || null : null,
+        nameAr: body.nameAr ? cleanKeywordName(sanitize(body.nameAr)) : null,
+        nameEn: body.nameEn ? cleanKeywordName(sanitize(body.nameEn)) : null,
       };
       if (!names.nameAr && !names.nameEn) {
         throw new HttpError({ statusCode: 422, message: 'An Arabic or English name is required' });
@@ -289,8 +291,8 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
       if (!existing) notFound();
 
       const names: Record<'nameAr' | 'nameEn', string | null | undefined> = {
-        nameAr: body.nameAr === undefined ? undefined : body.nameAr ? sanitize(body.nameAr) || null : null,
-        nameEn: body.nameEn === undefined ? undefined : body.nameEn ? sanitize(body.nameEn) || null : null,
+        nameAr: body.nameAr === undefined ? undefined : body.nameAr ? cleanKeywordName(sanitize(body.nameAr)) : null,
+        nameEn: body.nameEn === undefined ? undefined : body.nameEn ? cleanKeywordName(sanitize(body.nameEn)) : null,
       };
       const nameAr = names.nameAr === undefined ? existing.nameAr : names.nameAr;
       const nameEn = names.nameEn === undefined ? existing.nameEn : names.nameEn;

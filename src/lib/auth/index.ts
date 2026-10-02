@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db';
 import { env } from '@/env';
 import { SYSTEM_ROLES, systemRoleId } from '@/lib/permissions';
+import { grantTrialGift } from '@/lib/billing/trial';
 import { generateUniqueUsername } from './oauth';
 
 export const googleEnabled = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
@@ -112,6 +113,15 @@ export const auth = betterAuth({
             password: await bcrypt.hash(crypto.randomUUID(), 12),
           },
         }),
+        // A Google sign-up is a new registered reader: give the trial lenses.
+        // Best effort, so a failure never blocks signing in.
+        after: async (user) => {
+          try {
+            await prisma.$transaction((tx) => grantTrialGift(tx, user.id));
+          } catch (error) {
+            console.error(`TRIAL_GIFT_FAILED ${user.id}`, error);
+          }
+        },
       },
     },
   },

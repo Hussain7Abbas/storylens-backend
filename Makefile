@@ -1,7 +1,8 @@
 .PHONY: help install dev build start typecheck test test-live deprecations \
 	docker-up docker-down docker-logs \
 	db-generate db-migrate-dev db-migrate-deploy db-reset db-seed db-studio storage-seed setup \
-	pm2-start pm2-stop pm2-restart pm2-delete sync set-review-version seed-dashboard-admin notify-dashboard
+	pm2-start pm2-stop pm2-restart pm2-delete sync set-review-version seed-dashboard-admin notify-dashboard \
+	lens-audit grant-trial-gifts ai-smoke
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ECOSYSTEM := $(ROOT)/ecosystem.config.cjs
@@ -47,6 +48,11 @@ help:
 	@echo "  $(GREEN)set-review-version$(RESET)   set Review_Version config ($(YELLOW)VERSION=x.y.z$(RESET))"
 	@echo "  $(GREEN)seed-dashboard-admin$(RESET) create or reset the dashboard super admin from DASHBOARD_ADMIN_*"
 	@echo "  $(GREEN)notify-dashboard$(RESET)     trigger the dashboard deploy workflow ($(YELLOW)DASHBOARD_DISPATCH_TOKEN$(RESET))"
+	@echo ""
+	@echo "$(BLUE)Lenses$(RESET)"
+	@echo "  $(GREEN)lens-audit$(RESET)           check every lens balance against its ledger (read-only)"
+	@echo "  $(GREEN)grant-trial-gifts$(RESET)    give the trial to readers without it (dry run; $(YELLOW)CONFIRM=1$(RESET) applies)"
+	@echo "  $(GREEN)ai-smoke$(RESET)             one real Gemini call and one Seedream image (about 2 US cents); prints cost and data policy"
 	@echo ""
 
 install:
@@ -117,6 +123,15 @@ seed-dashboard-admin:
 
 notify-dashboard:
 	@cd "$(ROOT)" && bun run dashboard:notify
+
+lens-audit:
+	@cd "$(ROOT)" && bun run lens:audit
+
+grant-trial-gifts:
+	@cd "$(ROOT)" && CONFIRM="$${CONFIRM:-}" bun run lens:grant-trial
+
+ai-smoke:
+	@cd "$(ROOT)" && bun run ai:smoke
 
 pm2-start:
 	@cd "$(ROOT)" && pm2 start "$(ECOSYSTEM)" --update-env && pm2 save

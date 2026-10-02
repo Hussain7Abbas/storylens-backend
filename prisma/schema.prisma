@@ -32,6 +32,43 @@ enum MatchingType {
   PARTIAL
 }
 
+// Where a session token travels: bearer sessions only in `Authorization`
+// (extension, desktop client, dashboard), web sessions only in the website's
+// HttpOnly cookie (`src/lib/auth/web-session.ts`).
+enum SessionKind {
+  bearer
+  web
+}
+
+// Why a lens balance changed. See `src/lib/billing/ledger.ts`.
+enum LensTransactionType {
+  TRIAL_GIFT       // new registered reader
+  ADMIN_GIFT       // dashboard gift
+  ADMIN_ADJUSTMENT // dashboard correction, positive or negative
+  TOP_UP           // approved billing request
+  AI_CHARGE        // cloud AI action started
+  AI_REFUND        // cloud AI action delivered nothing
+}
+
+enum BillingRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum AiActionStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+// How the owner reaches a reader to arrange payment for a billing request.
+enum ContactChannel {
+  WHATSAPP
+  TELEGRAM
+}
+
 model User {
   id String @id @default(uuid())
 
@@ -60,6 +97,10 @@ model User {
   avatarId String?
   avatar   File?   @relation(fields: [avatarId], references: [id], name: "UserAvatars")
 
+  // Spendable lenses. Changed only by `applyLensChange` (src/lib/billing/ledger.ts),
+  // always together with a LensTransaction row. A CHECK constraint keeps it >= 0.
+  lensBalance Int @default(0)
+
   // Metadata
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -73,6 +114,12 @@ model User {
   replacements    Replacement[]    @relation("ReplacementCreator")
   sessions        Session[]
   accounts        Account[]
+
+  lensTransactions        LensTransaction[] @relation("LensTransactionUser")
+  lensTransactionsCreated LensTransaction[] @relation("LensTransactionCreator")
+  billingRequests         BillingRequest[]  @relation("BillingRequestUser")
+  billingRequestsReviewed BillingRequest[]  @relation("BillingRequestReviewer")
+  aiActions               AiAction[]
 }
 
 // A named set of permissions for one portal. System roles (fixed slugs) are
@@ -135,6 +182,7 @@ model Session {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   // The API this token was issued for; it is rejected by the other one.
   portal    Portal   @default(user)
+  kind      SessionKind @default(bearer)
 
   @@index([userId])
   @@map("session")
@@ -482,4 +530,165 @@ model SyncChange {
 
   @@index([novelId, seq])
   @@index([entity, seq])
+}
+
+// Append-only lens ledger: one row per balance change.
+model LensTransaction {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation("LensTransactionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  type         LensTransactionType
+  // Signed change, never 0.
+  delta        Int
+  // The balance right after this change.
+  balanceAfter Int
+  // Exactly-once key: trial:<userId>, gift:<clientId>, adjust:<clientId>, billing:<requestId>,
+  // ai-charge:<actionId>, ai-refund:<actionId>, merge-in:<guestId>, seed:<userId>.
+  idempotencyKey String @unique
+  // Shown to the reader for gifts; the reason for adjustments (dashboard only).
+  note String?
+
+  billingRequestId String?
+  billingRequest   BillingRequest? @relation(fields: [billingRequestId], references: [id], onDelete: SetNull)
+  aiActionId       String?
+  aiAction         AiAction?       @relation(fields: [aiActionId], references: [id], onDelete: SetNull)
+  // Copy of AiAction.feature, so history keeps its label after AiAction rows are pruned.
+  aiFeature        String?
+
+  // Dashboard user who gifted or adjusted.
+  createdById String?
+  createdBy   User?   @relation("LensTransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // TRIAL_GIFT, ADMIN_GIFT and TOP_UP rows are shown once in each app: the extension
+  // celebrates every one; the website celebrates gifts and notes top-ups.
+  // Null until that app has shown it.
+  websiteSeenAt   DateTime?
+  extensionSeenAt DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+}
+
+// A reader's request to buy lenses, reviewed on the dashboard.
+model BillingRequest {
+  // Client-generated UUID, so a resent form does not create a second request.
+  id     String  @id
+  userId String?
+  user   User?   @relation("BillingRequestUser", fields: [userId], references: [id], onDelete: SetNull)
+  // The reader's email when they asked; the dashboard also shows the current one.
+  userEmail String
+
+  lenses       Int
+  // Quoted price per lens, and lenses × price rounded half-up to cents.
+  unitPriceUsd Decimal @db.Decimal(12, 6)
+  totalUsd     Decimal @db.Decimal(12, 2)
+
+  status BillingRequestStatus @default(PENDING)
+  // Where the owner contacts the reader to arrange payment: a WhatsApp number in
+  // international format (+9647…), or a Telegram username (@name) or number.
+  contactChannel ContactChannel
+  contactHandle  String
+  // Optional message from the reader.
+  note   String?
+  // Language for emails about this request (`en` or `ar`, from Accept-Language).
+  locale String @default("en")
+
+  rejectionReason String?
+  reviewedById    String?
+  reviewedBy      User?     @relation("BillingRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  cancelledAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions LensTransaction[]
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+// One pricing record per AI feature. Rows are created by migration; the dashboard edits them.
+model AiFeaturePrice {
+  // Stable contract with clients: page_summary, keyword_suggestion, chapter_extraction,
+  // character_image, novel_context, selector_detection.
+  key String @id
+
+  nameEn        String
+  nameAr        String
+  descriptionEn String?
+  descriptionAr String?
+
+  // Lenses charged once per action; 0 makes the feature free.
+  lenses  Int     @default(0)
+  enabled Boolean @default(true)
+
+  // Models are not per feature: text features (and the image brief) use the
+  // `AI_Text_Model` config, character_image the `AI_Image_Model` config.
+  maxPromptChars  Int
+  maxOutputTokens Int
+  sortOrder       Int @default(0)
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// One cloud AI action as the reader sees it: one charge, at most one refund.
+model AiAction {
+  // Client-generated UUID, shared by both attempts of an action.
+  id     String @id
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  feature       String
+  status        AiActionStatus @default(RUNNING)
+  lensesCharged Int
+  refunded      Boolean        @default(false)
+  attempts      Int            @default(1)
+  // For statistics only; no foreign key, so deleting a novel keeps the row.
+  novelId       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  calls        AiCall[]
+  transactions LensTransaction[]
+
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+  @@index([feature, createdAt])
+}
+
+// One provider request. Never holds prompts, answers or images.
+model AiCall {
+  id       String   @id @default(uuid())
+  actionId String
+  action   AiAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  attempt Int
+  // `main`, or `brief` for the text step of a character image.
+  step    String @default("main")
+  model   String
+  // succeeded | failed | cancelled
+  status    String
+  errorCode String?
+
+  inputTokens     Int?
+  outputTokens    Int?
+  reasoningTokens Int?
+  // OpenRouter `usage.cost` in USD (before OpenRouter's credit purchase fee).
+  costUsd    Decimal? @db.Decimal(12, 6)
+  durationMs Int
+  // OpenRouter generation ID, for disputes and debugging.
+  providerId String?
+  // `deny` when restricted to providers that do not keep or train on data, `allow` after a fallback.
+  dataPolicy String?
+
+  createdAt DateTime @default(now())
+
+  @@index([actionId])
+  @@index([createdAt])
 }

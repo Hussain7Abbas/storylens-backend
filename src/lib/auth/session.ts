@@ -1,4 +1,4 @@
-import type { Portal, Prisma, PrismaClient } from '@prisma/client';
+import type { Portal, Prisma, PrismaClient, SessionKind } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -81,11 +81,18 @@ export async function createCredentialAccount(
   });
 }
 
-/** Issues a bearer token that only `portal`'s API accepts. */
+/** Days a session lasts; the website's cookie uses the same lifetime. */
+export const SESSION_TTL_SECONDS = SESSION_TTL_MS / 1000;
+
+/**
+ * Issues a token that only `portal`'s API accepts. Bearer tokens travel in
+ * `Authorization`; web tokens only in the website's HttpOnly cookie.
+ */
 export async function createSessionToken(
   prisma: PrismaClient,
   userId: string,
   portal: Portal,
+  kind: SessionKind = 'bearer',
 ): Promise<string> {
   const token = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
@@ -96,6 +103,7 @@ export async function createSessionToken(
       expiresAt,
       userId,
       portal,
+      kind,
     },
   });
 
@@ -104,9 +112,10 @@ export async function createSessionToken(
 
 export type BearerSession = { user: UserWithAccess; portal: Portal };
 
-export async function getSessionFromBearerToken(
+async function sessionOfKind(
   prisma: PrismaClient,
   token: string | undefined,
+  kind: SessionKind,
 ): Promise<BearerSession | null> {
   if (!token) {
     return null;
@@ -117,11 +126,21 @@ export async function getSessionFromBearerToken(
     include: { user: { include: authUserInclude } },
   });
 
-  if (!session || session.expiresAt <= new Date()) {
+  if (!session || session.kind !== kind || session.expiresAt <= new Date()) {
     return null;
   }
 
   return { user: session.user, portal: session.portal };
+}
+
+/** A session from `Authorization: Bearer`; web (cookie) tokens are refused. */
+export function getSessionFromBearerToken(prisma: PrismaClient, token: string | undefined): Promise<BearerSession | null> {
+  return sessionOfKind(prisma, token, 'bearer');
+}
+
+/** A session from the website's cookie; bearer tokens are refused. */
+export function getSessionFromWebToken(prisma: PrismaClient, token: string | undefined): Promise<BearerSession | null> {
+  return sessionOfKind(prisma, token, 'web');
 }
 
 export async function verifyCredentialPassword(

@@ -20,5 +20,5 @@ export function createOpenRouterClient(options: OpenRouterClientOptions = {}) {
 }
 
 export function resolveOpenRouterModel(model?: string) {
-  return model ?? process.env.OPENROUTER_MODEL ?? DEFAULT_OPENROUTER_MODEL;
+  return model ?? DEFAULT_OPENROUTER_MODEL;
 }

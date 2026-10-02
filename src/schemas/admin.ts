@@ -48,6 +48,7 @@ export const adminUserSchema = t.Object({
   image: t.Nullable(t.String()),
   isGuest: t.Boolean(),
   isUser: t.Boolean(),
+  lensBalance: t.Number(),
   userRoleId: t.Nullable(t.String()),
   userRole: t.Nullable(roleSummarySchema),
   isAdmin: t.Boolean(),

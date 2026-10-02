@@ -19,6 +19,7 @@ const userSelect = {
   image: true,
   isGuest: true,
   isUser: true,
+  lensBalance: true,
   userRoleId: true,
   userRole: roleSummary,
   isAdmin: true,

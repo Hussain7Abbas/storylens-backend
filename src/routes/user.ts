@@ -1,6 +1,9 @@
 import { Elysia } from 'elysia';
 import { accounts } from './accounts';
+import { webSession } from './web-session';
 import { ai } from './ai';
+import { aiCloud } from './ai-cloud';
+import { billing } from './billing';
 import { chapters } from './chapters';
 import { files } from './files';
 import { keywordAliases } from './keyword-aliases';
@@ -21,6 +24,7 @@ import { websiteSelectors } from './website-selectors';
  */
 export const userApi = new Elysia({ prefix: '/api/user' })
   .use(accounts)
+  .use(webSession)
   .use(websiteSelectors)
   .use(websiteNovelBiases)
   .use(novels)
@@ -34,4 +38,6 @@ export const userApi = new Elysia({ prefix: '/api/user' })
   .use(keywordNatures)
   .use(files)
   .use(ai)
+  .use(aiCloud)
+  .use(billing)
   .use(sync);
