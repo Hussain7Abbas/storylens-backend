@@ -26,10 +26,11 @@ const fakePrisma = {
   create: async () => ({}),
   findUnique: async ({ where }: { where: { token: string } }) => {
    const user = users.find(u => `${u.id}-token` === where.token);
-   return user ? { expiresAt: new Date(Date.now() + 60_000), portal: 'user', user } : null;
+   return user ? { expiresAt: new Date(Date.now() + 60_000), portal: 'user', kind: 'bearer', user } : null;
   },
  },
- $transaction: async (queries: Promise<unknown>[]) => Promise.all(queries),
+ $transaction: async (arg: unknown): Promise<unknown> =>
+  typeof arg === 'function' ? arg(fakePrisma) : Promise.all(arg as Promise<unknown>[]),
 };
 mock.module('@/setup', () => ({ setup: new Elysia({ name: 'setup' })
  .decorate('prisma', fakePrisma)

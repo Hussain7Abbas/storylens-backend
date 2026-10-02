@@ -18,6 +18,7 @@ import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsResource, authorize } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
 import { setup } from "@/setup";
+import { cleanKeywordName, stripArabicDiacritics } from "@/utils/arabic";
 import { HttpError } from "@/utils/errors";
 import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
 import { sanitizeObject } from "@/utils/sanitize";
@@ -60,7 +61,7 @@ async function assertKeywordNamesFree(
 }
 
 function cleanName(value: string | null | undefined): string | null | undefined {
-	return value === undefined || value === null ? value : sanitizeObject(value).trim() || null;
+	return value === undefined || value === null ? value : cleanKeywordName(sanitizeObject(value));
 }
 
 const aliasShape = t.Object({
@@ -131,14 +132,16 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				where.novelId = query.novelId;
 			}
 
-			if (query?.search) {
+			// Names are stored without Arabic diacritics, so the search drops them too.
+			const search = query?.search ? stripArabicDiacritics(query.search) : "";
+			if (search) {
 				const { ids, total } = await queryWeightedSearchIds(prisma, {
 					table: "Keyword",
 					primaryColumn: name,
 					secondaryColumn: name,
-					search: query.search,
+					search,
 					filters: {
-						novelId: query.novelId,
+						novelId: query?.novelId,
 						notNullColumn: name,
 					},
 					skip: skip ?? 0,
@@ -259,10 +262,10 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			const replay = await findReplay(findKeyword, isReplay, t);
 			if (replay) return replay as unknown as KeywordWithChildren;
 
-			assertHasName(body, t);
 			const sanitizedBody = sanitizeObject(body);
 			const { novelId, categoryId, natureId } = sanitizedBody;
 			const names = { nameAr: cleanName(body.nameAr), nameEn: cleanName(body.nameEn) };
+			assertHasName(names, t);
 
 			const [category, nature, novel] = await Promise.all([
 				prisma.keywordCategory.findUnique({ where: { id: categoryId } }),

@@ -64,6 +64,11 @@ export const PUBLIC_ENDPOINTS = new Set<string>([
   'POST /api/user/auth/login',
   'GET /api/user/auth/providers',
   'POST /api/user/auth/oauth/session',
+  'GET /api/user/billing/pricing',
+  'POST /api/user/auth/web/login',
+  'POST /api/user/auth/web/register/verify',
+  'POST /api/user/auth/web/oauth/session',
+  'POST /api/user/auth/web/logout',
   'POST /api/admin/auth/login',
 ]);
 
@@ -132,7 +137,9 @@ export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
   'POST /api/user/auth/change-password/verify': 'Confirm a password change',
   'POST /api/user/auth/change-email': 'Request an email change code',
   'POST /api/user/auth/change-email/verify': 'Confirm an email change',
-  'POST /api/user/ai/chapter-selectors': 'Detect chapter selectors with AI',
+  'POST /api/user/ai/chapter-selectors': 'Detect chapter selectors with AI (deprecated: use cloud AI prompts)',
+  'POST /api/user/ai/prompts': 'Run a Story Lens Cloud AI text action (uses lenses)',
+  'POST /api/user/ai/images': 'Draw a character image with Story Lens Cloud AI (uses lenses)',
   'GET /api/user/novels/': 'List novels',
   'GET /api/user/novels/:id': 'View a novel with its chapters',
   'POST /api/user/novels/': 'Add a novel',
@@ -193,6 +200,14 @@ export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
   'POST /api/user/website-novel-biases/': 'Set a website novel bias',
   'DELETE /api/user/website-novel-biases/:id': 'Delete a website novel bias',
   'POST /api/user/files/upload': 'Upload an image or video',
+  'POST /api/user/auth/web/extension-session': 'Sign the extension in with the website session',
+  'POST /api/user/auth/web/adopt': 'Sign the website in with the extension session',
+  'GET /api/user/billing/balance': 'View own lens balance and unseen gift and purchase notices',
+  'POST /api/user/billing/notices/seen': 'Mark own lens notices as shown',
+  'GET /api/user/billing/transactions': 'View own lens history',
+  'GET /api/user/billing/requests': 'View own lens requests',
+  'POST /api/user/billing/requests': 'Request lenses',
+  'POST /api/user/billing/requests/:id/cancel': 'Cancel own pending lens request',
 };
 
 const METHOD_VERBS: Record<string, string> = {

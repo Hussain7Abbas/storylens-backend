@@ -1,6 +1,7 @@
 import { detectChapterSelectors } from '@/lib/ai';
 import { Elysia, t } from 'elysia';
 import { env } from '@/env';
+import { getBillingConfig } from '@/lib/billing/config';
 import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
@@ -24,7 +25,7 @@ export const ai = new Elysia({
 
   .post(
     '/chapter-selectors',
-    async ({ t, body }) => {
+    async ({ t, body, prisma }) => {
       if (!env.OPENROUTER_API_KEY) {
         throw new HttpError({
           statusCode: 503,
@@ -44,7 +45,8 @@ export const ai = new Elysia({
           },
           {
             apiKey: env.OPENROUTER_API_KEY,
-            model: body.model ?? env.OPENROUTER_MODEL,
+            // The text model chosen in the dashboard (`AI_Text_Model`).
+            model: body.model ?? (await getBillingConfig(prisma)).textModel,
           },
         );
 
@@ -74,6 +76,12 @@ export const ai = new Elysia({
         html: t.String({ minLength: 1 }),
         model: t.Optional(t.String()),
       }),
+      // Extensions from 3.4.0 send selector detection through `POST /ai/prompts`.
+      deprecated: {
+        since: '2026-10-02',
+        removeAfter: '2027-01-31',
+        replacement: 'POST /api/user/ai/prompts (feature selector_detection)',
+      },
       response: {
         200: t.Object({
           result: t.Object({

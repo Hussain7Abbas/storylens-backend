@@ -3,6 +3,7 @@ import { Elysia, t } from 'elysia';
 import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
+import { validateConfigValue } from '@/lib/billing/config';
 
 /**
  * Application configuration (for example `Review_Version`), managed from the
@@ -74,6 +75,11 @@ export const adminConfigs = new Elysia({
   .put(
     '/',
     async ({ prisma, body }) => {
+      // Billing and cloud AI keys must parse; other keys stay free-form.
+      const invalid = validateConfigValue(body.key, body.value);
+      if (invalid) {
+        throw new HttpError({ code: 'INVALID_CONFIG_VALUE', message: invalid, details: { key: body.key } });
+      }
       const config = await prisma.config.upsert({
         where: { key: body.key },
         update: {

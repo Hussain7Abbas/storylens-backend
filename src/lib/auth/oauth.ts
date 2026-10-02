@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { applyLensChange } from '@/lib/billing/ledger';
 
 type UsernameLookup = Pick<PrismaClient, 'user'>;
 
@@ -38,13 +39,25 @@ export async function mergeGuestInto(
 ): Promise<void> {
   const from = { createdById: guestId };
   const to = { createdById: userId };
-  await prisma.$transaction([
-    prisma.novel.updateMany({ where: from, data: to }),
-    prisma.keyword.updateMany({ where: from, data: to }),
-    prisma.keywordAlias.updateMany({ where: from, data: to }),
-    prisma.keywordVersion.updateMany({ where: from, data: to }),
-    prisma.replacement.updateMany({ where: from, data: to }),
-    prisma.file.updateMany({ where: { userId: guestId }, data: { userId } }),
-    prisma.user.delete({ where: { id: guestId } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    await tx.novel.updateMany({ where: from, data: to });
+    await tx.keyword.updateMany({ where: from, data: to });
+    await tx.keywordAlias.updateMany({ where: from, data: to });
+    await tx.keywordVersion.updateMany({ where: from, data: to });
+    await tx.replacement.updateMany({ where: from, data: to });
+    await tx.file.updateMany({ where: { userId: guestId }, data: { userId } });
+    // Guests never get lenses, but keep any the guest somehow holds; its own
+    // ledger rows go with it.
+    const guest = await tx.user.findUnique({ where: { id: guestId }, select: { lensBalance: true } });
+    if (guest && guest.lensBalance > 0) {
+      await applyLensChange(tx, {
+        userId,
+        delta: guest.lensBalance,
+        type: 'ADMIN_ADJUSTMENT',
+        idempotencyKey: `merge-in:${guestId}`,
+        note: 'Merged from a guest install',
+      });
+    }
+    await tx.user.delete({ where: { id: guestId } });
+  });
 }

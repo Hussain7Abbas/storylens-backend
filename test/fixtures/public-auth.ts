@@ -49,6 +49,8 @@ const fakePrisma = {
   create: async () => ({}),
  },
  session: { create: async () => { sessions += 1; return {}; } },
+ // No billing config: the trial gift is 0, so registration grants nothing here (the live tests cover gifts).
+ config: { findMany: async () => [] },
 };
 mock.module('@/lib/email', () => ({ sendEmail: async (message: { to: string; text: string }) => { if (deliver) sent.push(message); return deliver; } }));
 mock.module('@/setup', () => ({ setup: new Elysia({ name: 'setup' })

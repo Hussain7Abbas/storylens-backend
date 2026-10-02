@@ -6,6 +6,7 @@ import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsAnyOf, authorize } from "@/middleware/authorize";
 import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
 import { setup } from "@/setup";
+import { cleanKeywordName } from "@/utils/arabic";
 import { HttpError } from "@/utils/errors";
 import { getNestedColumnObject, parsePaginationProps } from "@/utils/helpers";
 import { sanitizeObject } from "@/utils/sanitize";
@@ -23,7 +24,7 @@ const aliasWithStyleShape = t.Object({
 type Translate = (messages: { en: string; ar: string }) => string;
 
 function cleanName(value: string | null | undefined): string | null | undefined {
-	return value === undefined || value === null ? value : value.trim() || null;
+	return value === undefined || value === null ? value : cleanKeywordName(value);
 }
 
 function aliasNotFound(t: Translate): HttpError {
@@ -105,10 +106,10 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 			const replay = await findReplay(findAlias, isReplay, t);
 			if (replay) return replay;
 
-			assertHasName(body, t);
 			const sanitizedBody = sanitizeObject(body);
 			const { keywordId } = sanitizedBody;
 			const names = { nameAr: cleanName(body.nameAr) ?? null, nameEn: cleanName(body.nameEn) ?? null };
+			assertHasName(names, t);
 
 			const keyword = await prisma.keyword.findUnique({ where: { id: keywordId } });
 			if (!keyword) {
