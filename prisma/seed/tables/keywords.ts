@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { cleanKeywordName } from '@/utils/arabic';
 import { seedKeywords as seedKeywordsData } from '../data/keywords';
 import { mapLegacyRole } from '../utils/legacy-role-mapper';
 import { indexBy } from '../utils/lookups';
@@ -25,6 +26,10 @@ export async function seedKeywords(prisma: PrismaClient) {
   const categoryByName = indexBy(keywordCategories, (category) => category.nameAr ?? category.nameEn ?? "");
   const natureByName = indexBy(keywordNatures, (nature) => nature.nameAr ?? nature.nameEn ?? "");
 
+  const existingKeywords = await prisma.keyword.findMany({
+    select: { id: true, nameAr: true, novelId: true },
+  });
+  const existingByName = indexBy(existingKeywords, (keyword) => `${keyword.novelId}::${keyword.nameAr}`);
   const seen = new Set<string>();
 
   const rows = seedKeywordsData.flatMap((keyword) => {
@@ -34,10 +39,11 @@ export async function seedKeywords(prisma: PrismaClient) {
     const natureRecord = natureByName.get(nature);
 
     if (!novel || !categoryRecord || !natureRecord) {
-      return [];
+      throw new Error(`Missing seed references for keyword "${keyword.name}" in "${keyword.novelName}" (${category}/${nature})`);
     }
 
-    const name = keyword.name.trim();
+    const name = cleanKeywordName(keyword.name);
+    if (!name) return [];
     const dedupeKey = `${novel.id}::${name}`;
     if (seen.has(dedupeKey)) {
       return [];
@@ -45,7 +51,7 @@ export async function seedKeywords(prisma: PrismaClient) {
     seen.add(dedupeKey);
 
     return [{
-      id: crypto.randomUUID(),
+      id: existingByName.get(dedupeKey)?.id ?? crypto.randomUUID(),
       nameAr: name,
       description: keyword.description,
       novelId: novel.id,
@@ -58,6 +64,7 @@ export async function seedKeywords(prisma: PrismaClient) {
   await prisma.$transaction([
     prisma.keyword.createMany({
       data: rows.map(({ id, nameAr, novelId, createdAt }) => ({ id, nameAr, novelId, createdAt })),
+      skipDuplicates: true,
     }),
     prisma.keywordVersion.createMany({
       data: rows.map(({ id, description, categoryId, natureId, createdAt }) => ({
@@ -68,6 +75,7 @@ export async function seedKeywords(prisma: PrismaClient) {
         startingChapter: 0,
         createdAt,
       })),
+      skipDuplicates: true,
     }),
   ]);
 }

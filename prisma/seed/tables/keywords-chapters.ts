@@ -20,13 +20,17 @@ export async function seedKeywordsChapters(prisma: PrismaClient) {
   }
 
   const chaptersByNovelId = groupBy(chapters, (chapter) => chapter.novelId);
+  const links = await prisma.keywordsChapters.findMany({
+    select: { keywordId: true, chapterId: true },
+  });
+  const existing = new Set(links.map((link) => `${link.keywordId}:${link.chapterId}`));
 
   await prisma.keywordsChapters.createMany({
     data: keywords.flatMap((keyword) => {
       const novelChapters = chaptersByNovelId.get(keyword.novelId);
       const firstChapter = novelChapters?.[0];
 
-      if (!firstChapter) {
+      if (!firstChapter || existing.has(`${keyword.id}:${firstChapter.id}`)) {
         return [];
       }
 
