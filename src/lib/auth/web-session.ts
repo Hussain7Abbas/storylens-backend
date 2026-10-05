@@ -14,15 +14,19 @@ import { env } from '@/env';
 export const WEB_SESSION_HEADER = 'x-storylens-web';
 export const WEB_SESSION_COOKIE = env.WEB_SESSION_INSECURE_COOKIE ? 'sl_web' : '__Host-sl_web';
 
-export function webOrigins(): string[] {
-  const origins = [new URL(env.WEBSITE_URL).origin];
-  if (env.NODE_ENV !== 'production' && env.WEBSITE_DEV_ORIGINS) {
-    for (const origin of env.WEBSITE_DEV_ORIGINS.split(',')) {
+type WebsiteOriginConfig = Pick<typeof env, 'WEBSITE_URL' | 'NODE_ENV' | 'WEBSITE_DEV_ORIGINS'>;
+
+export function webOrigins(config: WebsiteOriginConfig = env): string[] {
+  const origins = [new URL(config.WEBSITE_URL).origin];
+  if (config.NODE_ENV !== 'production') {
+    // The website's default dev port; trust exact origins, never every localhost port.
+    origins.push('http://localhost:3000', 'http://127.0.0.1:3000');
+    for (const origin of (config.WEBSITE_DEV_ORIGINS ?? '').split(',')) {
       const trimmed = origin.trim();
       if (trimmed) origins.push(new URL(trimmed).origin);
     }
   }
-  return origins;
+  return [...new Set(origins)];
 }
 
 export function isWebOrigin(origin: string | null): boolean {
