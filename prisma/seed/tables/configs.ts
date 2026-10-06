@@ -6,5 +6,6 @@ export async function seedConfigs(prisma: PrismaClient) {
 
 	await prisma.config.createMany({
 		data: configs,
+		skipDuplicates: true,
 	});
 }

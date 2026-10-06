@@ -18,8 +18,8 @@ export const env = createEnv({
     BETTER_AUTH_URL: z.string().optional(),
     // Website origin that hosts account pages; OAuth redirects back to it.
     WEBSITE_URL: z.url().default('https://storylens.iscoded.com'),
-    // Extra website origins allowed to use the website session cookie outside
-    // production, comma-separated (for example `http://localhost:3010`).
+    // Extra website origins outside production, comma-separated. The website's
+    // default http://localhost:3000 and http://127.0.0.1:3000 are already allowed.
     WEBSITE_DEV_ORIGINS: z.string().optional(),
     // `true` drops `Secure` and the `__Host-` prefix from the website session
     // cookie for plain-HTTP local development. Refused in production.

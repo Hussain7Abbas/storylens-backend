@@ -10,5 +10,6 @@ export async function seedNovels(prisma: PrismaClient) {
       slugs: novel.slugs,
       descriptionAr: `Last modified: ${novel.lastModified}`,
     })),
+    skipDuplicates: true,
   });
 }

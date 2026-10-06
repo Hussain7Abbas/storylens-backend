@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { cleanKeywordName } from '@/utils/arabic';
 import { seedReplacements } from '../data/replacements';
 import { indexBy } from '../utils/lookups';
 
@@ -33,7 +34,7 @@ export async function seedKeywordReplacement(prisma: PrismaClient) {
         return [];
       }
 
-      const from = replacement.from.trim();
+      const from = cleanKeywordName(replacement.from);
       const keywordId = keywordByNovelAndName.get(`${novel.id}:${from}`);
 
       return [

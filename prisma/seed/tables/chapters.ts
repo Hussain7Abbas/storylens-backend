@@ -11,6 +11,11 @@ export async function seedChapters(prisma: PrismaClient) {
     throw new Error('No novels found');
   }
 
+  const chapters = await prisma.chapter.findMany({
+    select: { novelId: true, number: true },
+  });
+  const existing = new Set(chapters.map((chapter) => `${chapter.novelId}:${chapter.number}`));
+
   await prisma.chapter.createMany({
     data: novels.flatMap((novel) =>
       Array.from({ length: PLACEHOLDER_CHAPTER_COUNT }, (_, index) => ({
@@ -18,7 +23,7 @@ export async function seedChapters(prisma: PrismaClient) {
         description: null,
         number: index + 1,
         novelId: novel.id,
-      })),
+      })).filter((chapter) => !existing.has(`${chapter.novelId}:${chapter.number}`)),
     ),
   });
 }

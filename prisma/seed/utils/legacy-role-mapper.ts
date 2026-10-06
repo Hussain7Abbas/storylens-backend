@@ -14,15 +14,15 @@ const legacyRoleMap: Record<string, LegacyRoleMapping> = {
   /** protagonist */
   بطل: { category: 'بطل', nature: 'بطل' },
   /** ally / friend */
-  صديق: { category: 'ذكر', nature: 'صديق' },
+  صديق: { category: 'صديق', nature: 'صديق' },
   /** enemy */
-  عدو: { category: 'ذكر', nature: 'عدو' },
+  عدو: { category: 'عدو', nature: 'عدو' },
   /** mentor / trainer */
   مدرب: { category: 'سيد', nature: 'صديق' },
   /** sect / faction */
-  طائفة: { category: 'سيد', nature: 'صديق' },
+  طائفة: { category: 'مكان', nature: 'صديق' },
   /** skill / technique */
-  مهارة: { category: 'بطل', nature: 'بطل' },
+  مهارة: { category: 'مهارة', nature: 'بطل' },
 };
 
 export function mapLegacyRole(role: string): LegacyRoleMapping {

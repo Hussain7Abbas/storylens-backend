@@ -35,7 +35,7 @@ export type SeedKeywordNature = {
   description?: string;
 };
 
-export type KeywordCategoryName = 'انثى' | 'بطل' | 'ذكر' | 'سيد';
+export type KeywordCategoryName = 'انثى' | 'بطل' | 'عدو' | 'صديق' | 'سيد' | 'مهارة' | 'اداة' | 'مكان';
 
 export type KeywordNatureName = 'عدو' | 'صديق' | 'بطل';
 

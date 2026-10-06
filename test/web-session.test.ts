@@ -73,13 +73,15 @@ afterAll(async () => {
 });
 
 describe('website session', () => {
-  live('signs in with an HttpOnly, Secure, SameSite=Strict host cookie', async () => {
+  live('signs in with the configured HttpOnly, SameSite=Strict cookie', async () => {
     const response = await send('POST', '/auth/web/login', { body: { email: member.email, password: PASSWORD } });
     expect(response.status).toBe(200);
     expect(response.json.user).toMatchObject({ id: member.id });
     expect(response.json).not.toHaveProperty('token');
     const cookie = response.setCookie.find((value) => value.startsWith(`${WEB_SESSION_COOKIE}=`)) ?? '';
-    for (const part of ['HttpOnly', 'Secure', 'SameSite=Strict', 'Path=/']) expect(cookie).toContain(part);
+    for (const part of ['HttpOnly', 'SameSite=Strict', 'Path=/']) expect(cookie).toContain(part);
+    if (env.WEB_SESSION_INSECURE_COOKIE) expect(cookie).not.toContain('Secure');
+    else expect(cookie).toContain('Secure');
     expect(cookie).not.toContain('Domain=');
     const session = await prisma.session.findUniqueOrThrow({ where: { token: tokenFrom(response.setCookie) } });
     expect(session.kind).toBe('web');
@@ -90,6 +92,21 @@ describe('website session', () => {
     const elsewhere = await send('POST', '/auth/web/login', { body, origin: 'https://evil.example' });
     expect([elsewhere.status, elsewhere.json.code]).toEqual([403, 'WEB_ORIGIN_REQUIRED']);
     const noHeader = await send('POST', '/auth/web/login', { body, csrf: false });
+    expect([noHeader.status, noHeader.json.code]).toEqual([403, 'WEB_ORIGIN_REQUIRED']);
+  });
+
+  live('signs in from the default localhost website and reads its cookie', async () => {
+    const origin = 'http://localhost:3000';
+    const response = await send('POST', '/auth/web/login', {
+      body: { email: member.email, password: PASSWORD }, origin,
+    });
+    expect(response.status).toBe(200);
+    const token = tokenFrom(response.setCookie);
+    expect((await send('GET', '/auth/me', { cookie: token, origin })).status).toBe(200);
+    expect((await send('GET', '/auth/me', { cookie: token, origin: 'http://localhost:3040' })).status).toBe(401);
+    const noHeader = await send('POST', '/auth/web/login', {
+      body: { email: member.email, password: PASSWORD }, origin, csrf: false,
+    });
     expect([noHeader.status, noHeader.json.code]).toEqual([403, 'WEB_ORIGIN_REQUIRED']);
   });
 

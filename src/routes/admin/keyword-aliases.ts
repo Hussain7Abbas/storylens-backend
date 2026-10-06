@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { MatchingType } from '@/lib/db';
+import { mergeTranslationAlias } from '@/lib/keywords/merge';
 import { authorize } from '@/middleware/authorize';
 import { adminAliasSchema, styleBody, styleInclude } from '@/schemas/admin-keywords';
 import { setup } from '@/setup';
@@ -47,6 +48,9 @@ async function assertNamesFree(
 
 const aliasFields = {
   ...styleBody,
+  // Translation link: the alias of the same keyword that holds this one's
+  // other-language name. It is merged into this alias and deleted.
+  translationAliasId: t.Optional(t.String({ format: 'uuid' })),
   nameAr: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
   nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
   matchingType: t.Optional(MatchingType),
@@ -60,24 +64,34 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
 
   .post(
     '/',
-    async ({ prisma, authedUser, body }) => {
+    async ({ prisma, authedUser, body, t }) => {
       const names = { nameAr: cleanName(body.nameAr) ?? null, nameEn: cleanName(body.nameEn) ?? null };
       if (!names.nameAr && !names.nameEn) nameRequired();
       const keyword = await prisma.keyword.findUnique({ where: { id: body.keywordId }, select: { id: true } });
       if (!keyword) notFound('Keyword');
       await assertStyleRefs(prisma, body);
       await assertNamesFree(prisma, keyword.id, names);
-      return prisma.keywordAlias.create({
-        data: {
-          ...styleData(body),
-          ...names,
-          matchingType: body.matchingType ?? 'FULL',
-          fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
-          overrideStyle: body.overrideStyle ?? false,
-          keywordId: keyword.id,
-          createdById: authedUser.id,
-        },
-        include: styleInclude,
+      return prisma.$transaction(async (tx) => {
+        const linked = body.translationAliasId
+          ? await mergeTranslationAlias(tx, {
+              target: { keywordId: keyword.id, ...names },
+              sourceId: body.translationAliasId,
+              t,
+            })
+          : {};
+        return tx.keywordAlias.create({
+          data: {
+            ...styleData(body),
+            ...names,
+            ...linked,
+            matchingType: body.matchingType ?? 'FULL',
+            fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
+            overrideStyle: body.overrideStyle ?? false,
+            keywordId: keyword.id,
+            createdById: authedUser.id,
+          },
+          include: styleInclude,
+        });
       });
     },
     {
@@ -92,7 +106,7 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
 
   .put(
     '/:id',
-    async ({ prisma, params: { id }, body }) => {
+    async ({ prisma, params: { id }, body, t }) => {
       const existing = await prisma.keywordAlias.findUnique({ where: { id } });
       if (!existing) notFound('Alias');
       await assertStyleRefs(prisma, body);
@@ -109,16 +123,26 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
         },
         id,
       );
-      return prisma.keywordAlias.update({
-        where: { id },
-        data: {
-          ...styleData(body),
-          ...names,
-          matchingType: body.matchingType,
-          fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters,
-          overrideStyle: body.overrideStyle,
-        },
-        include: styleInclude,
+      return prisma.$transaction(async (tx) => {
+        const linked = body.translationAliasId
+          ? await mergeTranslationAlias(tx, {
+              target: { id, keywordId: existing.keywordId, nameAr, nameEn },
+              sourceId: body.translationAliasId,
+              t,
+            })
+          : {};
+        return tx.keywordAlias.update({
+          where: { id },
+          data: {
+            ...styleData(body),
+            ...names,
+            ...linked,
+            matchingType: body.matchingType,
+            fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters,
+            overrideStyle: body.overrideStyle,
+          },
+          include: styleInclude,
+        });
       });
     },
     {

@@ -13,6 +13,7 @@ import {
 	ReplacementPlain,
 } from "@/lib/db";
 import type { PrismaClient } from "@prisma/client";
+import { mergeTranslationKeyword } from "@/lib/keywords/merge";
 import { assertNotStale, compareAndSwap } from "@/lib/sync/precondition";
 import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsResource, authorize } from "@/middleware/authorize";
@@ -310,6 +311,20 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 							},
 						});
 
+						// A translation link merges the keyword named in the other language
+						// into this one, which then takes the name it was missing.
+						if (body.translationKeywordId) {
+							const linked = await mergeTranslationKeyword(tx, {
+								target: { id: kw.id, novelId, nameAr: kw.nameAr, nameEn: kw.nameEn },
+								sourceId: body.translationKeywordId,
+								t,
+								assertMayAbsorb: (source) => assertOwnsResource(source.createdById, authedUser),
+							});
+							if (Object.keys(linked).length) {
+								await tx.keyword.update({ where: { id: kw.id }, data: linked });
+							}
+						}
+
 						return tx.keyword.findUniqueOrThrow({
 							where: { id: kw.id },
 							include: keywordInclude,
@@ -334,6 +349,9 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				categoryId: t.String({ format: "uuid" }),
 				natureId: t.String({ format: "uuid" }),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+				// Translation link: the keyword that holds this one's other-language name.
+				// It is merged into the new keyword and deleted (see `mergeTranslationKeyword`).
+				translationKeywordId: t.Optional(t.String({ format: "uuid" })),
 			}),
 			response: {
 				200: keywordWithChildrenShape,
@@ -378,15 +396,41 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				...(names.nameEn && names.nameEn !== existingKeyword.nameEn ? [{ nameEn: names.nameEn }] : []),
 			], id);
 
-			const keyword = await compareAndSwap(() => prisma.keyword.update({
-				where: { id, updatedAt: existingKeyword.updatedAt },
-				data: {
-					...names,
-					matchingType: sanitizedBody.matchingType,
-					fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
-				},
-				include: keywordInclude,
-			}), () => prisma.keyword.findUniqueOrThrow({ where: { id }, include: keywordInclude }), t);
+			const loadCurrent = () =>
+				prisma.keyword.findUniqueOrThrow({ where: { id }, include: keywordInclude });
+
+			// The merge and the keyword's own write are one transaction: the absorbed
+			// keyword frees its names before this one takes them.
+			const keyword = await compareAndSwap(
+				() =>
+					prisma.$transaction(async (tx) => {
+						const linked = body.translationKeywordId
+							? await mergeTranslationKeyword(tx, {
+									target: {
+										id,
+										novelId: existingKeyword.novelId,
+										nameAr: names.nameAr === undefined ? existingKeyword.nameAr : names.nameAr,
+										nameEn: names.nameEn === undefined ? existingKeyword.nameEn : names.nameEn,
+									},
+									sourceId: body.translationKeywordId,
+									t,
+									assertMayAbsorb: (source) => assertOwnsResource(source.createdById, authedUser),
+								})
+							: {};
+						return tx.keyword.update({
+							where: { id, updatedAt: existingKeyword.updatedAt },
+							data: {
+								...names,
+								...linked,
+								matchingType: sanitizedBody.matchingType,
+								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
+							},
+							include: keywordInclude,
+						});
+					}),
+				loadCurrent,
+				t,
+			);
 
 			return keyword as unknown as KeywordWithChildren;
 		},
@@ -399,6 +443,9 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				...translatedNameBody,
 				matchingType: t.Optional(MatchingType),
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+				// Translation link: the keyword that holds this one's other-language name.
+				// It is merged into this keyword and deleted (see `mergeTranslationKeyword`).
+				translationKeywordId: t.Optional(t.String({ format: "uuid" })),
 			}),
 			response: {
 				200: keywordWithChildrenShape,
