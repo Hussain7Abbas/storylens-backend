@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { MatchingType } from '@/lib/db';
+import { absorb, type AliasNameRow, mergeTranslationKeyword, takenAliasNames } from '@/lib/keywords/merge';
 import { authorize } from '@/middleware/authorize';
 import { adminListQuery, pageArgs } from '@/schemas/admin';
 import { adminKeywordDetailSchema, keywordDetailInclude, styleBody } from '@/schemas/admin-keywords';
@@ -68,58 +69,6 @@ async function loadPair(tx: Tx, id: string, targetId: string) {
   if (!source || !target) notFound();
   if (source.novelId !== target.novelId) conflict('Both keywords must belong to the same novel');
   return { source, target };
-}
-
-type AliasNameRow = { id: string; nameAr: string | null; nameEn: string | null };
-
-const NAME_COLUMNS = ['nameAr', 'nameEn'] as const;
-
-/** Names already used by `aliases` in each language (the per-keyword unique constraints). */
-function takenAliasNames(aliases: AliasNameRow[]) {
-  return {
-    nameAr: new Set(aliases.flatMap((alias) => (alias.nameAr ? [alias.nameAr] : []))),
-    nameEn: new Set(aliases.flatMap((alias) => (alias.nameEn ? [alias.nameEn] : []))),
-  };
-}
-
-/**
- * Moves what hangs off `source` (aliases, chapter links, replacements) onto
- * `target`, then deletes `source`. An alias that shares a name in one language
- * with a target alias fills the target alias's missing translation when the two
- * agree; otherwise it moves with only the names the target does not have yet.
- */
-async function absorb(tx: Tx, source: { id: string; aliases: AliasNameRow[] }, target: { id: string; aliases: AliasNameRow[] }) {
-  for (const alias of source.aliases) {
-    const taken = takenAliasNames(target.aliases);
-    const existing = target.aliases.find((other) =>
-      NAME_COLUMNS.some((column) => alias[column] && other[column] === alias[column]),
-    );
-    const compatible =
-      existing && NAME_COLUMNS.every((column) => !alias[column] || !existing[column] || alias[column] === existing[column]);
-
-    if (existing && compatible) {
-      const names = {
-        nameAr: existing.nameAr ?? (alias.nameAr && !taken.nameAr.has(alias.nameAr) ? alias.nameAr : null),
-        nameEn: existing.nameEn ?? (alias.nameEn && !taken.nameEn.has(alias.nameEn) ? alias.nameEn : null),
-      };
-      if (names.nameAr !== existing.nameAr || names.nameEn !== existing.nameEn) {
-        await tx.keywordAlias.update({ where: { id: existing.id }, data: names });
-        Object.assign(existing, names);
-      }
-      continue;
-    }
-
-    const names = {
-      nameAr: alias.nameAr && !taken.nameAr.has(alias.nameAr) ? alias.nameAr : null,
-      nameEn: alias.nameEn && !taken.nameEn.has(alias.nameEn) ? alias.nameEn : null,
-    };
-    if (!names.nameAr && !names.nameEn) continue;
-    await tx.keywordAlias.update({ where: { id: alias.id }, data: { keywordId: target.id, ...names } });
-    target.aliases.push({ ...alias, ...names });
-  }
-  await tx.keywordsChapters.updateMany({ where: { keywordId: source.id }, data: { keywordId: target.id } });
-  await tx.replacement.updateMany({ where: { keywordId: source.id }, data: { keywordId: target.id } });
-  await tx.keyword.delete({ where: { id: source.id } });
 }
 
 /** Adds the source keyword's names (either language) as one alias of the target. */
@@ -238,7 +187,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
   // A keyword always starts with its base version (chapter 0), which holds its details.
   .post(
     '/',
-    async ({ prisma, authedUser, body }) => {
+    async ({ prisma, authedUser, body, t }) => {
       const novel = await prisma.novel.findUnique({ where: { id: body.novelId }, select: { id: true } });
       if (!novel) throw new HttpError({ statusCode: 404, message: 'Novel not found' });
       const names = {
@@ -258,16 +207,29 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         });
         if (taken) conflict(`Another keyword in this novel is already named “${name}”`);
       }
-      return prisma.keyword.create({
-        data: {
-          ...names,
-          matchingType: body.matchingType ?? 'FULL',
-          fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
-          novelId: novel.id,
-          createdById: authedUser.id,
-          versions: { create: { ...styleData(body), startingChapter: 0, createdById: authedUser.id } },
-        },
-        include: keywordDetailInclude,
+      return prisma.$transaction(async (tx) => {
+        const keyword = await tx.keyword.create({
+          data: {
+            ...names,
+            matchingType: body.matchingType ?? 'FULL',
+            fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
+            novelId: novel.id,
+            createdById: authedUser.id,
+            versions: { create: { ...styleData(body), startingChapter: 0, createdById: authedUser.id } },
+          },
+        });
+        // A translation link merges the keyword named in the other language into this one.
+        const linked = body.translationKeywordId
+          ? await mergeTranslationKeyword(tx, {
+              target: { id: keyword.id, novelId: novel.id, nameAr: keyword.nameAr, nameEn: keyword.nameEn },
+              sourceId: body.translationKeywordId,
+              t,
+            })
+          : {};
+        if (Object.keys(linked).length) {
+          await tx.keyword.update({ where: { id: keyword.id }, data: linked });
+        }
+        return tx.keyword.findUniqueOrThrow({ where: { id: keyword.id }, include: keywordDetailInclude });
       });
     },
     {
@@ -277,6 +239,9 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         matchingType: t.Optional(MatchingType),
         fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+        // Translation link: the keyword holding this one's other-language name,
+        // merged into it and deleted (`POST /:id/link` the other way round).
+        translationKeywordId: t.Optional(t.String({ format: 'uuid' })),
         ...styleBody,
       }),
       response: { 200: adminKeywordDetailSchema },
@@ -286,7 +251,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
 
   .put(
     '/:id',
-    async ({ prisma, params: { id }, body }) => {
+    async ({ prisma, params: { id }, body, t }) => {
       const existing = await prisma.keyword.findUnique({ where: { id } });
       if (!existing) notFound();
 
@@ -308,10 +273,24 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         if (taken) conflict(`Another keyword in this novel is already named “${name}”`);
       }
 
-      const keyword = await prisma.keyword.update({
-        where: { id },
-        data: { ...names, matchingType: body.matchingType, fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters },
-        include: keywordInclude,
+      const keyword = await prisma.$transaction(async (tx) => {
+        const linked = body.translationKeywordId
+          ? await mergeTranslationKeyword(tx, {
+              target: { id, novelId: existing.novelId, nameAr, nameEn },
+              sourceId: body.translationKeywordId,
+              t,
+            })
+          : {};
+        return tx.keyword.update({
+          where: { id },
+          data: {
+            ...names,
+            ...linked,
+            matchingType: body.matchingType,
+            fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters,
+          },
+          include: keywordInclude,
+        });
       });
       return toKeyword(keyword);
     },
@@ -322,6 +301,9 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         matchingType: t.Optional(MatchingType),
         fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+        // Translation link: the keyword holding this one's other-language name,
+        // merged into it and deleted (`POST /:id/link` the other way round).
+        translationKeywordId: t.Optional(t.String({ format: 'uuid' })),
       }),
       response: { 200: adminKeywordSchema },
       detail: { summary: 'Set a keyword’s Arabic and English names and matching' },

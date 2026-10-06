@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordAliasPlain, KeywordCategoryPlain, KeywordNaturePlain, MatchingType } from "@/lib/db";
+import { mergeTranslationAlias } from "@/lib/keywords/merge";
 import { assertNotStale, compareAndSwap } from "@/lib/sync/precondition";
 import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsAnyOf, authorize } from "@/middleware/authorize";
@@ -123,21 +124,35 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 
 			return createWithReplay(
 				() =>
-					prisma.keywordAlias.create({
-						data: {
-							id: body.id,
-							...names,
-							description: sanitizedBody.description ?? null,
-							matchingType: sanitizedBody.matchingType ?? "FULL",
-							fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters ?? true,
-							categoryId: sanitizedBody.categoryId ?? null,
-							natureId: sanitizedBody.natureId ?? null,
-							imageId: sanitizedBody.imageId ?? null,
-							overrideStyle: sanitizedBody.overrideStyle ?? false,
-							keywordId,
-							createdById: authedUser.id,
-						},
-						include: aliasInclude,
+					prisma.$transaction(async (tx) => {
+						// A translation link merges the sibling alias named in the other
+						// language into this one, freeing its name before the create.
+						const linked = body.translationAliasId
+							? await mergeTranslationAlias(tx, {
+									target: { id: body.id, keywordId, ...names },
+									sourceId: body.translationAliasId,
+									t,
+									assertMayAbsorb: (source) =>
+										assertOwnsAnyOf([source.createdById, keyword.createdById], authedUser),
+								})
+							: {};
+						return tx.keywordAlias.create({
+							data: {
+								id: body.id,
+								...names,
+								...linked,
+								description: sanitizedBody.description ?? null,
+								matchingType: sanitizedBody.matchingType ?? "FULL",
+								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters ?? true,
+								categoryId: sanitizedBody.categoryId ?? null,
+								natureId: sanitizedBody.natureId ?? null,
+								imageId: sanitizedBody.imageId ?? null,
+								overrideStyle: sanitizedBody.overrideStyle ?? false,
+								keywordId,
+								createdById: authedUser.id,
+							},
+							include: aliasInclude,
+						});
 					}),
 				findAlias,
 				isReplay,
@@ -156,6 +171,9 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				overrideStyle: t.Optional(t.Boolean()),
+				// Translation link: the alias of the same keyword that holds this one's
+				// other-language name. It is merged into the new alias and deleted.
+				translationAliasId: t.Optional(t.String({ format: "uuid" })),
 			}),
 			response: { 200: aliasWithStyleShape },
 		},
@@ -196,20 +214,42 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				...(names.nameEn && names.nameEn !== existing.nameEn ? [{ nameEn: names.nameEn }] : []),
 			], id);
 
-			return compareAndSwap(() => prisma.keywordAlias.update({
-				where: { id, updatedAt: existing.updatedAt },
-				data: {
-					...names,
-					description: sanitizedBody.description,
-					matchingType: sanitizedBody.matchingType,
-					fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
-					categoryId: sanitizedBody.categoryId,
-					natureId: sanitizedBody.natureId,
-					imageId: sanitizedBody.imageId,
-					overrideStyle: sanitizedBody.overrideStyle,
-				},
-				include: aliasInclude,
-			}), () => prisma.keywordAlias.findUniqueOrThrow({ where: { id }, include: aliasInclude }), t);
+			return compareAndSwap(
+				() =>
+					prisma.$transaction(async (tx) => {
+						const linked = body.translationAliasId
+							? await mergeTranslationAlias(tx, {
+									target: {
+										id,
+										keywordId: existing.keywordId,
+										nameAr: names.nameAr === undefined ? existing.nameAr : names.nameAr,
+										nameEn: names.nameEn === undefined ? existing.nameEn : names.nameEn,
+									},
+									sourceId: body.translationAliasId,
+									t,
+									assertMayAbsorb: (source) =>
+										assertOwnsAnyOf([source.createdById, existing.keyword.createdById], authedUser),
+								})
+							: {};
+						return tx.keywordAlias.update({
+							where: { id, updatedAt: existing.updatedAt },
+							data: {
+								...names,
+								...linked,
+								description: sanitizedBody.description,
+								matchingType: sanitizedBody.matchingType,
+								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
+								categoryId: sanitizedBody.categoryId,
+								natureId: sanitizedBody.natureId,
+								imageId: sanitizedBody.imageId,
+								overrideStyle: sanitizedBody.overrideStyle,
+							},
+							include: aliasInclude,
+						});
+					}),
+				() => prisma.keywordAlias.findUniqueOrThrow({ where: { id }, include: aliasInclude }),
+				t,
+			);
 		},
 		{
 			params: t.Object({ id: t.String({ format: "uuid" }) }),
@@ -223,6 +263,9 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				overrideStyle: t.Optional(t.Boolean()),
+				// Translation link: the alias of the same keyword that holds this one's
+				// other-language name. It is merged into this alias and deleted.
+				translationAliasId: t.Optional(t.String({ format: "uuid" })),
 			}),
 			response: { 200: aliasWithStyleShape, 409: staleWriteSchema(aliasWithStyleShape) },
 		},

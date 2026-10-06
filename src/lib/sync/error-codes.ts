@@ -22,6 +22,12 @@ export const SYNC_ERROR_CODES = [
   'CATEGORY_IN_USE',
   'NATURE_IN_USE',
   'CURSOR_EXPIRED',
+  // Translation links (`src/lib/keywords/merge.ts`).
+  'TRANSLATION_SELF',
+  'TRANSLATION_OTHER_NOVEL',
+  'TRANSLATION_OTHER_KEYWORD',
+  'TRANSLATION_SAME_LANGUAGE',
+  'TRANSLATION_HAS_VERSIONS',
 ] as const;
 
 export type SyncErrorCode = (typeof SYNC_ERROR_CODES)[number];
