@@ -1,3 +1,4 @@
+import { descriptionData } from '@/lib/keywords/descriptions';
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordCategoryPlain, KeywordNaturePlain, KeywordVersionPlain } from "@/lib/db";
 import { assertNotStale, compareAndSwap } from "@/lib/sync/precondition";
@@ -83,7 +84,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 	// returns the same row without closing the previous version again.
 	.post(
 		"/",
-		async ({ t, prisma, body, authedUser }) => {
+		async ({ t, prisma, body, authedUser, lang }) => {
 			const findVersion = () => prisma.keywordVersion.findUnique({ where: { id: body.id }, include: versionInclude });
 			const isReplay = (row: { createdById: string | null; keywordId: string }) =>
 				row.createdById === authedUser.id && row.keywordId === body.keywordId;
@@ -148,7 +149,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 						return tx.keywordVersion.create({
 							data: {
 								id: body.id,
-								description: sanitizedBody.description ?? null,
+								...descriptionData(sanitizedBody, lang),
 								categoryId,
 								natureId,
 								imageId: sanitizedBody.imageId ?? null,
@@ -172,6 +173,8 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				categoryId: t.Optional(t.String({ format: "uuid" })),
 				natureId: t.Optional(t.String({ format: "uuid" })),
 				description: t.Optional(t.Nullable(t.String())),
+				descriptionAr: t.Optional(t.Nullable(t.String())),
+				descriptionEn: t.Optional(t.Nullable(t.String())),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				currentChapter: t.Optional(t.Number({ minimum: 0 })),
 				startingChapter: t.Optional(t.Number({ minimum: 0 })),
@@ -186,7 +189,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 	// ranges change only for moderators.
 	.put(
 		"/:id",
-		async ({ t, prisma, params: { id }, body, authedUser }) => {
+		async ({ t, prisma, params: { id }, body, authedUser, lang }) => {
 			const existing = await prisma.keywordVersion.findUnique({
 				where: { id },
 				include: { keyword: true },
@@ -218,7 +221,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 			}
 
 			const updateData: Record<string, unknown> = {
-				description: sanitizedBody.description,
+				...descriptionData(sanitizedBody, lang),
 				categoryId: sanitizedBody.categoryId,
 				natureId: sanitizedBody.natureId,
 				imageId: sanitizedBody.imageId,
@@ -240,6 +243,8 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 			body: t.Object({
 				baseUpdatedAt: t.String({ format: "date-time" }),
 				description: t.Optional(t.Nullable(t.String())),
+				descriptionAr: t.Optional(t.Nullable(t.String())),
+				descriptionEn: t.Optional(t.Nullable(t.String())),
 				categoryId: t.Optional(t.String({ format: "uuid" })),
 				natureId: t.Optional(t.String({ format: "uuid" })),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),

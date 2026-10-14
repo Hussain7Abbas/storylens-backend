@@ -111,6 +111,38 @@ describe('offline-first migrations', () => {
     }
   }, 120_000);
 
+  live('preserves legacy keyword and alias descriptions in the matching language', async () => {
+    const workdir = mkdtempSync(join(tmpdir(), 'storylens-description-migration-'));
+    const name = `storylens_desctest_${process.pid}`;
+    let client: PrismaClient | undefined;
+    try {
+      await prepare(name, workdir, (migration) => migration < '20261014125105_localized_keyword_descriptions');
+      client = await seed(name, [
+        ...baseRows,
+        `INSERT INTO "KeywordAlias" (id, "nameEn", description, "keywordId", "updatedAt") VALUES ('desc-ar', 'Arabic description', 'وصف عربي', 'k1', now()), ('desc-en', 'English description', 'Chapter ١٢', 'k1', now())`,
+      ]);
+      const result = deploy(name, workdir, () => true);
+      expect(result.exitCode, result.stderr.toString()).toBe(0);
+      const rows = await client.$queryRawUnsafe<{ id: string; description: string; descriptionAr: string | null; descriptionEn: string | null }[]>(
+        'SELECT id, description, "descriptionAr", "descriptionEn" FROM "KeywordAlias" ORDER BY id',
+      );
+      expect(rows).toEqual([
+        { id: 'desc-ar', description: 'وصف عربي', descriptionAr: 'وصف عربي', descriptionEn: null },
+        { id: 'desc-en', description: 'Chapter ١٢', descriptionAr: null, descriptionEn: 'Chapter ١٢' },
+      ]);
+      const versions = await client.$queryRawUnsafe<{ description: string; descriptionAr: string | null; descriptionEn: string | null }[]>(
+        'SELECT description, "descriptionAr", "descriptionEn" FROM "KeywordVersion"',
+      );
+      expect(versions).toEqual([{ description: 'a &lt; b', descriptionAr: null, descriptionEn: 'a &lt; b' }]);
+    } finally {
+      await client?.$disconnect();
+      const admin = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+      await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+      await admin.$disconnect();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   live('stops with a list when a backfill would duplicate an alias name', async () => {
     const workdir = mkdtempSync(join(tmpdir(), 'storylens-migrations-'));
     const name = `storylens_migtest_dup_${process.pid}`;

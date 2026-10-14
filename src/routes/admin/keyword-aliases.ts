@@ -81,9 +81,9 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
           : {};
         return tx.keywordAlias.create({
           data: {
-            ...styleData(body),
             ...names,
             ...linked,
+            ...styleData(body),
             matchingType: body.matchingType ?? 'FULL',
             fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
             overrideStyle: body.overrideStyle ?? false,
@@ -134,9 +134,9 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
         return tx.keywordAlias.update({
           where: { id },
           data: {
-            ...styleData(body),
             ...names,
             ...linked,
+            ...styleData(body),
             matchingType: body.matchingType,
             fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters,
             overrideStyle: body.overrideStyle,

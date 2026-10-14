@@ -85,7 +85,7 @@ async function addNamesAsAliases(
     nameEn: string | null;
     matchingType: 'FULL' | 'PARTIAL';
     fuzzyMatchArabicCharacters: boolean;
-    versions: { description: string | null; categoryId: string | null; natureId: string | null; imageId: string | null }[];
+    versions: { descriptionAr: string | null; descriptionEn: string | null; description: string | null; categoryId: string | null; natureId: string | null; imageId: string | null }[];
   },
 ) {
   const taken = takenAliasNames(target.aliases);
@@ -103,6 +103,8 @@ async function addNamesAsAliases(
       matchingType: source.matchingType,
       fuzzyMatchArabicCharacters: source.fuzzyMatchArabicCharacters,
       description: base?.description ?? null,
+      descriptionAr: base?.descriptionAr ?? null,
+      descriptionEn: base?.descriptionEn ?? null,
       categoryId: base?.categoryId ?? null,
       natureId: base?.natureId ?? null,
       imageId: base?.imageId ?? null,
@@ -479,6 +481,8 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
             startingChapter,
             endingChapter: next ? next.startingChapter - 1 : null,
             description: base?.description ?? null,
+            descriptionAr: base?.descriptionAr ?? null,
+            descriptionEn: base?.descriptionEn ?? null,
             categoryId: base?.categoryId ?? null,
             natureId: base?.natureId ?? null,
             imageId: base?.imageId ?? null,

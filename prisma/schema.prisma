@@ -363,6 +363,8 @@ model KeywordAlias {
   nameAr        String?
   nameEn        String?
   description   String?
+  descriptionAr String?
+  descriptionEn String?
   matchingType  MatchingType @default(FULL)
   fuzzyMatchArabicCharacters Boolean @default(true)
   overrideStyle Boolean      @default(false)
@@ -394,6 +396,8 @@ model KeywordAlias {
 model KeywordVersion {
   id              String  @id @default(uuid())
   description     String?
+  descriptionAr String?
+  descriptionEn String?
   startingChapter Int
   endingChapter   Int?
 

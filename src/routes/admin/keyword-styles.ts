@@ -1,3 +1,4 @@
+import { descriptionData } from '@/lib/keywords/descriptions';
 import type { Prisma } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { KeywordCategoryPlain, KeywordNaturePlain } from '@/lib/db';
@@ -8,6 +9,8 @@ import { sanitize } from '@/utils/sanitize';
 
 type StyleInput = {
   description?: string | null;
+  descriptionAr?: string | null;
+  descriptionEn?: string | null;
   categoryId?: string | null;
   natureId?: string | null;
   imageId?: string | null;
@@ -23,11 +26,18 @@ export async function assertStyleRefs(prisma: Prisma.TransactionClient, body: St
   if (body.natureId && !nature) throw new HttpError({ statusCode: 404, message: 'Nature not found' });
 }
 
+function cleanDescription(value: string | null | undefined) {
+  return value === undefined ? undefined : value === null ? null : sanitize(value) || null;
+}
+
 /** Style fields for Prisma: `undefined` keeps a value, `null` or blank clears it. */
 export function styleData(body: StyleInput) {
   return {
-    description:
-      body.description === undefined ? undefined : body.description === null ? null : sanitize(body.description) || null,
+    ...descriptionData({
+      description: cleanDescription(body.description),
+      descriptionAr: cleanDescription(body.descriptionAr),
+      descriptionEn: cleanDescription(body.descriptionEn),
+    }),
     categoryId: body.categoryId,
     natureId: body.natureId,
     imageId: body.imageId,

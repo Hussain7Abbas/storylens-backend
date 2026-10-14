@@ -1,3 +1,4 @@
+import { descriptionData } from '@/lib/keywords/descriptions';
 import { Elysia, t, type Static } from "elysia";
 import {
 	ChapterPlain,
@@ -254,7 +255,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 	// its base version, so a replay (a lost response sent again) returns the same row.
 	.post(
 		"/",
-		async ({ t, prisma, body, authedUser }) => {
+		async ({ t, prisma, body, authedUser, lang }) => {
 			const findKeyword = () =>
 				prisma.keyword.findUnique({ where: { id: body.id }, include: keywordInclude });
 			const isReplay = (row: { createdById: string | null; novelId: string }) =>
@@ -300,7 +301,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 						await tx.keywordVersion.create({
 							data: {
 								id: body.versionId,
-								description: sanitizedBody.description ?? null,
+								...descriptionData(sanitizedBody, lang),
 								categoryId,
 								natureId,
 								imageId: sanitizedBody.imageId ?? null,
@@ -343,6 +344,8 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				versionId: t.String({ format: "uuid" }),
 				...translatedNameBody,
 				description: t.Optional(t.Nullable(t.String())),
+				descriptionAr: t.Optional(t.Nullable(t.String())),
+				descriptionEn: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 				novelId: t.String({ format: "uuid" }),
@@ -362,7 +365,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 	// Update keyword (own for readers, any for moderators). Partial: only sent fields change.
 	.put(
 		"/:id",
-		async ({ t, prisma, params: { id }, body, authedUser }) => {
+		async ({ t, prisma, params: { id }, body, authedUser, lang }) => {
 			const existingKeyword = await prisma.keyword.findUnique({ where: { id } });
 
 			if (!existingKeyword) {
