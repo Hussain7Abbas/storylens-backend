@@ -1,3 +1,4 @@
+import { descriptionData } from '@/lib/keywords/descriptions';
 import type { PrismaClient } from "@prisma/client";
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordAliasPlain, KeywordCategoryPlain, KeywordNaturePlain, MatchingType } from "@/lib/db";
@@ -99,7 +100,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 	// replay (a lost response sent again) returns the same row.
 	.post(
 		"/",
-		async ({ t, prisma, body, authedUser }) => {
+		async ({ t, prisma, body, authedUser, lang }) => {
 			const findAlias = () => prisma.keywordAlias.findUnique({ where: { id: body.id }, include: aliasInclude });
 			const isReplay = (row: { createdById: string | null; keywordId: string }) =>
 				row.createdById === authedUser.id && row.keywordId === body.keywordId;
@@ -141,7 +142,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 								id: body.id,
 								...names,
 								...linked,
-								description: sanitizedBody.description ?? null,
+								...descriptionData(sanitizedBody, lang),
 								matchingType: sanitizedBody.matchingType ?? "FULL",
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters ?? true,
 								categoryId: sanitizedBody.categoryId ?? null,
@@ -165,6 +166,8 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				keywordId: t.String({ format: "uuid" }),
 				...translatedNameBody,
 				description: t.Optional(t.Nullable(t.String())),
+				descriptionAr: t.Optional(t.Nullable(t.String())),
+				descriptionEn: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
@@ -183,7 +186,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 	// Partial: only sent fields change; `null` clears the description or image.
 	.put(
 		"/:id",
-		async ({ t, prisma, params: { id }, body, authedUser }) => {
+		async ({ t, prisma, params: { id }, body, authedUser, lang }) => {
 			const existing = await prisma.keywordAlias.findUnique({
 				where: { id },
 				include: { keyword: true },
@@ -236,7 +239,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 							data: {
 								...names,
 								...linked,
-								description: sanitizedBody.description,
+								...descriptionData(sanitizedBody, lang),
 								matchingType: sanitizedBody.matchingType,
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
 								categoryId: sanitizedBody.categoryId,
@@ -257,6 +260,8 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				baseUpdatedAt: t.String({ format: "date-time" }),
 				...translatedNameBody,
 				description: t.Optional(t.Nullable(t.String())),
+				descriptionAr: t.Optional(t.Nullable(t.String())),
+				descriptionEn: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),

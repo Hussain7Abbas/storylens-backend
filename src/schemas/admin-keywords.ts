@@ -34,6 +34,8 @@ export const adminKeywordDetailSchema = t.Composite([
 /** Fields an alias or version shares; `null` clears one. */
 export const styleBody = {
   description: t.Optional(t.Nullable(t.String({ maxLength: 5000 }))),
+  descriptionAr: t.Optional(t.Nullable(t.String({ maxLength: 5000 }))),
+  descriptionEn: t.Optional(t.Nullable(t.String({ maxLength: 5000 }))),
   categoryId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
   natureId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
   imageId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),

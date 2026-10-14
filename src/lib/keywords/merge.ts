@@ -1,11 +1,12 @@
 import type { Prisma } from '@prisma/client';
 import { HttpError } from '@/utils/errors';
+import type { DescriptionInput } from './descriptions';
 
 type Tx = Prisma.TransactionClient;
 
 type Translate = (messages: { en: string; ar: string }) => string;
 
-export type AliasNameRow = { id: string; nameAr: string | null; nameEn: string | null };
+export type AliasNameRow = { id: string; nameAr: string | null; nameEn: string | null; descriptionAr?: string | null; descriptionEn?: string | null };
 
 export const NAME_COLUMNS = ['nameAr', 'nameEn'] as const;
 
@@ -42,8 +43,10 @@ export async function absorb(
       const names = {
         nameAr: existing.nameAr ?? (alias.nameAr && !taken.nameAr.has(alias.nameAr) ? alias.nameAr : null),
         nameEn: existing.nameEn ?? (alias.nameEn && !taken.nameEn.has(alias.nameEn) ? alias.nameEn : null),
+        descriptionAr: existing.descriptionAr ?? alias.descriptionAr,
+        descriptionEn: existing.descriptionEn ?? alias.descriptionEn,
       };
-      if (names.nameAr !== existing.nameAr || names.nameEn !== existing.nameEn) {
+      if (names.nameAr !== existing.nameAr || names.nameEn !== existing.nameEn || names.descriptionAr !== existing.descriptionAr || names.descriptionEn !== existing.descriptionEn) {
         await tx.keywordAlias.update({ where: { id: existing.id }, data: names });
         Object.assign(existing, names);
       }
@@ -128,7 +131,7 @@ function missingNames(target: NamedRow, source: NamedRow, t: Translate): Partial
  * aliases, chapter links and replacements move onto it, and `source` is deleted.
  * A `source` that no longer exists is ignored, so a replayed write (a lost
  * response sent again) succeeds instead of failing on the row it already merged.
- * Style (category, nature, image, description) is not copied: the caller's form
+ * Missing description translations are copied independently. Shared style (category, nature, image) is not copied: the caller's form
  * sends the values it filled in from the translation. Run inside the same
  * transaction as the target's own write, before it, so the names it takes are
  * free of the unique constraints.
@@ -152,7 +155,7 @@ export async function mergeTranslationKeyword(
   if (sourceId === target.id) refuse('TRANSLATION_SELF', t);
   const source = await tx.keyword.findUnique({
     where: { id: sourceId },
-    include: { aliases: true, versions: { select: { id: true } } },
+    include: { aliases: true, versions: { orderBy: { startingChapter: 'asc' } } },
   });
   if (!source) return {};
   if (source.novelId !== target.novelId) refuse('TRANSLATION_OTHER_NOVEL', t);
@@ -161,6 +164,14 @@ export async function mergeTranslationKeyword(
   assertMayAbsorb?.(source);
 
   const names = missingNames(target, source, t);
+  const base = await tx.keywordVersion.findFirst({ where: { keywordId: target.id }, orderBy: { startingChapter: 'asc' } });
+  const sourceBase = source.versions[0];
+  if (base && sourceBase) {
+    await tx.keywordVersion.update({ where: { id: base.id }, data: {
+      descriptionAr: base.descriptionAr ?? sourceBase.descriptionAr,
+      descriptionEn: base.descriptionEn ?? sourceBase.descriptionEn,
+    } });
+  }
   // Free the unique names before the target takes them.
   await tx.keyword.update({ where: { id: source.id }, data: { nameAr: null, nameEn: null } });
   await absorb(tx, source, { id: target.id, aliases: await tx.keywordAlias.findMany({ where: { keywordId: target.id } }) });
@@ -188,7 +199,7 @@ export async function mergeTranslationAlias(
     t: Translate;
     assertMayAbsorb?: (source: { createdById: string | null }) => void;
   },
-): Promise<Partial<NamedRow>> {
+): Promise<Partial<NamedRow> & DescriptionInput> {
   if (sourceId === target.id) refuse('TRANSLATION_SELF', t);
   const source = await tx.keywordAlias.findUnique({ where: { id: sourceId } });
   if (!source) return {};
@@ -196,6 +207,11 @@ export async function mergeTranslationAlias(
   assertMayAbsorb?.(source);
 
   const names = missingNames(target, source, t);
+  const stored = target.id ? await tx.keywordAlias.findUnique({ where: { id: target.id } }) : null;
   await tx.keywordAlias.delete({ where: { id: source.id } });
-  return names;
+  return {
+    ...names,
+    descriptionAr: stored?.descriptionAr ?? source.descriptionAr,
+    descriptionEn: stored?.descriptionEn ?? source.descriptionEn,
+  };
 }
