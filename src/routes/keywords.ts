@@ -18,6 +18,7 @@ import { mergeTranslationKeyword } from "@/lib/keywords/merge";
 import { assertNotStale, compareAndSwap } from "@/lib/sync/precondition";
 import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsResource, authorize } from "@/middleware/authorize";
+import { wordVfxSchema, wordVfxColorSchema } from '@/schemas/word-vfx';
 import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { cleanKeywordName, stripArabicDiacritics } from "@/utils/arabic";
@@ -298,6 +299,8 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 								...names,
 								matchingType: sanitizedBody.matchingType ?? "FULL",
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters ?? true,
+								wordVfx: sanitizedBody.wordVfx ?? "NONE",
+								wordVfxColor: sanitizedBody.wordVfxColor ?? null,
 								novelId,
 								createdById: authedUser.id,
 							},
@@ -355,6 +358,8 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				descriptionEn: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+				wordVfx: t.Optional(wordVfxSchema),
+				wordVfxColor: t.Optional(wordVfxColorSchema),
 				novelId: t.String({ format: "uuid" }),
 				categoryId: t.String({ format: "uuid" }),
 				natureId: t.String({ format: "uuid" }),
@@ -434,6 +439,8 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 								...linked,
 								matchingType: sanitizedBody.matchingType,
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
+								wordVfx: sanitizedBody.wordVfx,
+								wordVfxColor: sanitizedBody.wordVfxColor,
 							},
 							include: keywordInclude,
 						});
@@ -453,6 +460,8 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				...translatedNameBody,
 				matchingType: t.Optional(MatchingType),
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+				wordVfx: t.Optional(wordVfxSchema),
+				wordVfxColor: t.Optional(wordVfxColorSchema),
 				// Translation link: the keyword that holds this one's other-language name.
 				// It is merged into this keyword and deleted (see `mergeTranslationKeyword`).
 				translationKeywordId: t.Optional(t.String({ format: "uuid" })),

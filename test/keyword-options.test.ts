@@ -95,3 +95,81 @@ describe('category highlight effects', () => {
     expect((await call(reader, 'POST', '/keyword-categories', { ...body, effect: 'HEAT' })).status).toBe(403);
   });
 });
+
+describe('word VFX', () => {
+  type Word = { id: string; wordVfx: string; updatedAt: string };
+  for (const wordVfx of ['NONE', 'SPARKLES', 'HEAT', 'SHAKING', 'GLITCHING'] as const) {
+    live(`stores and replays independent keyword and alias ${wordVfx}`, async () => {
+      const body = keywordBody({ wordVfx });
+      const created = await call<Word>(reader, 'POST', '/keywords', body);
+      expect(created.status).toBe(200);
+      expect(created.body.wordVfx).toBe(wordVfx);
+      expect((await call(reader, 'POST', '/keywords', body)).body).toEqual(created.body);
+      const aliasBody = { id: crypto.randomUUID(), keywordId: body.id, nameEn: `Alias ${marker}`, wordVfx };
+      const alias = await call<Word>(reader, 'POST', '/keyword-aliases', aliasBody);
+      expect(alias.status).toBe(200);
+      expect(alias.body.wordVfx).toBe(wordVfx);
+      expect((await call(reader, 'POST', '/keyword-aliases', aliasBody)).body).toEqual(alias.body);
+      const updated = await call<Word>(reader, 'PUT', `/keywords/${body.id}`, { baseUpdatedAt: created.body.updatedAt, wordVfx: 'GLITCHING' });
+      expect(updated.status).toBe(200);
+      expect(updated.body.wordVfx).toBe('GLITCHING');
+      expect((await prisma.keywordAlias.findUniqueOrThrow({ where: { id: aliasBody.id } })).wordVfx).toBe(wordVfx);
+      const oldEdit = await call<Word>(reader, 'PUT', `/keywords/${body.id}`, { baseUpdatedAt: updated.body.updatedAt, matchingType: 'PARTIAL' });
+      expect(oldEdit.status).toBe(200);
+      expect(oldEdit.body.wordVfx).toBe('GLITCHING');
+      const aliasEdit = await call<Word>(reader, 'PUT', `/keyword-aliases/${aliasBody.id}`, { baseUpdatedAt: alias.body.updatedAt, wordVfx: 'NONE' });
+      expect(aliasEdit.status).toBe(200);
+      expect(aliasEdit.body.wordVfx).toBe('NONE');
+      const oldAliasEdit = await call<Word>(reader, 'PUT', `/keyword-aliases/${aliasBody.id}`, { baseUpdatedAt: aliasEdit.body.updatedAt, overrideStyle: true });
+      expect(oldAliasEdit.body.wordVfx).toBe('NONE');
+    });
+  }
+  live('defaults legacy words to NONE and rejects unsupported writes', async () => {
+    const body = keywordBody();
+    const created = await call<Word>(reader, 'POST', '/keywords', body);
+    expect(created.body.wordVfx).toBe('NONE');
+    expect((await call(reader, 'POST', '/keywords', keywordBody({ wordVfx: 'UNKNOWN' }))).status).toBe(422);
+    const alias = await call<Word>(reader, 'POST', '/keyword-aliases', { id: crypto.randomUUID(), keywordId: body.id, nameEn: 'Legacy alias' });
+    expect(alias.body.wordVfx).toBe('NONE');
+    expect((await call(reader, 'PUT', `/keywords/${body.id}`, { baseUpdatedAt: created.body.updatedAt, wordVfx: 'UNKNOWN' })).status).toBe(422);
+    expect((await call(reader, 'PUT', `/keyword-aliases/${alias.body.id}`, { baseUpdatedAt: alias.body.updatedAt, wordVfx: 'UNKNOWN' })).status).toBe(422);
+    const other = await makeActor('reader', `${marker}-other`);
+    ids.users.push(other.id);
+    expect((await call(other, 'PUT', `/keywords/${body.id}`, { baseUpdatedAt: created.body.updatedAt, wordVfx: 'HEAT' })).status).toBe(403);
+    expect((await call(other, 'PUT', `/keyword-aliases/${alias.body.id}`, { baseUpdatedAt: alias.body.updatedAt, wordVfx: 'HEAT' })).status).toBe(403);
+  });
+});
+
+describe('word VFX colors', () => {
+  type Word = { id: string; wordVfx: string; wordVfxColor: string | null; updatedAt: string };
+  live('defaults to inherited color, persists custom tints and clears them independently', async () => {
+    const body = keywordBody({ wordVfx: 'HEAT', wordVfxColor: '#A1b2C3' });
+    const keyword = await call<Word>(reader, 'POST', '/keywords', body);
+    expect(keyword.status).toBe(200);
+    expect(keyword.body.wordVfxColor).toBe('#A1b2C3');
+    const alias = await call<Word>(reader, 'POST', '/keyword-aliases', { id: crypto.randomUUID(), keywordId: body.id, nameEn: 'Color alias', wordVfx: 'SPARKLES' });
+    expect(alias.status).toBe(200);
+    expect(alias.body.wordVfxColor).toBeNull();
+    const tint = await call<Word>(reader, 'PUT', `/keyword-aliases/${alias.body.id}`, { baseUpdatedAt: alias.body.updatedAt, wordVfxColor: '#abcdef' });
+    expect(tint.status).toBe(200);
+    expect(tint.body.wordVfxColor).toBe('#abcdef');
+    const oldEdit = await call<Word>(reader, 'PUT', `/keyword-aliases/${alias.body.id}`, { baseUpdatedAt: tint.body.updatedAt, overrideStyle: true });
+    expect(oldEdit.body.wordVfxColor).toBe('#abcdef');
+    const clear = await call<Word>(reader, 'PUT', `/keyword-aliases/${alias.body.id}`, { baseUpdatedAt: oldEdit.body.updatedAt, wordVfxColor: null });
+    expect(clear.status).toBe(200);
+    expect(clear.body.wordVfxColor).toBeNull();
+    expect((await prisma.keyword.findUniqueOrThrow({ where: { id: body.id } })).wordVfxColor).toBe('#A1b2C3');
+    const inherited = await call<Word>(reader, 'PUT', `/keywords/${body.id}`, { baseUpdatedAt: keyword.body.updatedAt, wordVfxColor: null });
+    expect(inherited.status).toBe(200);
+    expect(inherited.body.wordVfxColor).toBeNull();
+  });
+  for (const wordVfxColor of ['', 'red', '#123', '#12345678', 'url(https://example.org)', '#12345z', '#123456\n']) {
+    live(`rejects invalid VFX color ${wordVfxColor}`, async () => {
+      expect((await call(reader, 'POST', '/keywords', keywordBody({ wordVfx: 'HEAT', wordVfxColor }))).status).toBe(422);
+      const created = await call<Word>(reader, 'POST', '/keywords', keywordBody());
+      const alias = await call<Word>(reader, 'POST', '/keyword-aliases', { id: crypto.randomUUID(), keywordId: created.body.id, nameEn: 'Invalid color alias' });
+      expect((await call(reader, 'PUT', `/keywords/${created.body.id}`, { baseUpdatedAt: created.body.updatedAt, wordVfxColor })).status).toBe(422);
+      expect((await call(reader, 'PUT', `/keyword-aliases/${alias.body.id}`, { baseUpdatedAt: alias.body.updatedAt, wordVfxColor })).status).toBe(422);
+    });
+  }
+});

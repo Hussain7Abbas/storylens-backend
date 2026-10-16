@@ -3,6 +3,7 @@ import { Elysia, t } from 'elysia';
 import { MatchingType } from '@/lib/db';
 import { mergeTranslationAlias } from '@/lib/keywords/merge';
 import { authorize } from '@/middleware/authorize';
+import { wordVfxSchema, wordVfxColorSchema } from '@/schemas/word-vfx';
 import { adminAliasSchema, styleBody, styleInclude } from '@/schemas/admin-keywords';
 import { setup } from '@/setup';
 import { cleanKeywordName } from '@/utils/arabic';
@@ -55,6 +56,8 @@ const aliasFields = {
   nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
   matchingType: t.Optional(MatchingType),
   fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+  wordVfx: t.Optional(wordVfxSchema),
+  wordVfxColor: t.Optional(wordVfxColorSchema),
   overrideStyle: t.Optional(t.Boolean()),
 };
 
@@ -86,6 +89,8 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
             ...styleData(body),
             matchingType: body.matchingType ?? 'FULL',
             fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
+            wordVfx: body.wordVfx ?? 'NONE',
+            wordVfxColor: body.wordVfxColor ?? null,
             overrideStyle: body.overrideStyle ?? false,
             keywordId: keyword.id,
             createdById: authedUser.id,
@@ -139,6 +144,8 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
             ...styleData(body),
             matchingType: body.matchingType,
             fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters,
+            wordVfx: body.wordVfx,
+            wordVfxColor: body.wordVfxColor,
             overrideStyle: body.overrideStyle,
           },
           include: styleInclude,

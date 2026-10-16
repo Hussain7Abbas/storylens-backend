@@ -27,6 +27,14 @@ enum Portal {
   user
 }
 
+enum WordVfx {
+  NONE
+  SPARKLES
+  HEAT
+  SHAKING
+  GLITCHING
+}
+
 enum MatchingType {
   FULL
   PARTIAL
@@ -299,7 +307,7 @@ model KeywordCategory {
   nameEn String?
   nameAr String?
   color  String
-  // Optional decoration for highlighted text; unknown effects render as NONE.
+  /// @deprecated use Keyword.wordVfx or KeywordAlias.wordVfx. remove-after: 2027-04-30
   effect String @default("NONE")
   // Explains when to use it; the AI keyword suggestion reads this.
   description String?
@@ -363,6 +371,10 @@ model Keyword {
   nameEn       String?
   matchingType MatchingType @default(FULL)
   fuzzyMatchArabicCharacters Boolean @default(true)
+  // Decoration belongs to this word, independent of category and style inheritance.
+  wordVfx WordVfx @default(NONE)
+  // Null follows this word’s resolved highlight color.
+  wordVfxColor String?
 
   novelId String
   novel   Novel  @relation(fields: [novelId], references: [id], name: "NovelKeywords", onDelete: Cascade)
@@ -396,6 +408,10 @@ model KeywordAlias {
   descriptionEn String?
   matchingType  MatchingType @default(FULL)
   fuzzyMatchArabicCharacters Boolean @default(true)
+  // Decoration belongs to this word, independent of category and style inheritance.
+  wordVfx WordVfx @default(NONE)
+  // Null follows this word’s resolved highlight color.
+  wordVfxColor String?
   overrideStyle Boolean      @default(false)
 
   categoryId String?

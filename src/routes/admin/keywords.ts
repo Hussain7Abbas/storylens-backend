@@ -1,8 +1,9 @@
-import type { Prisma } from '@prisma/client';
+import type { Prisma, WordVfx } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { MatchingType } from '@/lib/db';
 import { absorb, type AliasNameRow, mergeTranslationKeyword, takenAliasNames } from '@/lib/keywords/merge';
 import { authorize } from '@/middleware/authorize';
+import { wordVfxSchema, wordVfxColorSchema } from '@/schemas/word-vfx';
 import { adminListQuery, pageArgs } from '@/schemas/admin';
 import { adminKeywordDetailSchema, keywordDetailInclude, styleBody } from '@/schemas/admin-keywords';
 import { setup } from '@/setup';
@@ -85,6 +86,8 @@ async function addNamesAsAliases(
     nameEn: string | null;
     matchingType: 'FULL' | 'PARTIAL';
     fuzzyMatchArabicCharacters: boolean;
+    wordVfx: WordVfx;
+    wordVfxColor: string | null;
     versions: { descriptionAr: string | null; descriptionEn: string | null; description: string | null; categoryId: string | null; natureId: string | null; imageId: string | null }[];
   },
 ) {
@@ -102,6 +105,8 @@ async function addNamesAsAliases(
       ...names,
       matchingType: source.matchingType,
       fuzzyMatchArabicCharacters: source.fuzzyMatchArabicCharacters,
+      wordVfx: source.wordVfx,
+      wordVfxColor: source.wordVfxColor,
       description: base?.description ?? null,
       descriptionAr: base?.descriptionAr ?? null,
       descriptionEn: base?.descriptionEn ?? null,
@@ -215,6 +220,8 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
             ...names,
             matchingType: body.matchingType ?? 'FULL',
             fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
+            wordVfx: body.wordVfx ?? 'NONE',
+            wordVfxColor: body.wordVfxColor ?? null,
             novelId: novel.id,
             createdById: authedUser.id,
             versions: { create: { ...styleData(body), startingChapter: 0, createdById: authedUser.id } },
@@ -241,6 +248,8 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         matchingType: t.Optional(MatchingType),
         fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+        wordVfx: t.Optional(wordVfxSchema),
+        wordVfxColor: t.Optional(wordVfxColorSchema),
         // Translation link: the keyword holding this one's other-language name,
         // merged into it and deleted (`POST /:id/link` the other way round).
         translationKeywordId: t.Optional(t.String({ format: 'uuid' })),
@@ -290,6 +299,8 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
             ...linked,
             matchingType: body.matchingType,
             fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters,
+            wordVfx: body.wordVfx,
+            wordVfxColor: body.wordVfxColor,
           },
           include: keywordInclude,
         });
@@ -303,6 +314,8 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
         nameEn: t.Optional(t.Nullable(t.String({ maxLength: 300 }))),
         matchingType: t.Optional(MatchingType),
         fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+        wordVfx: t.Optional(wordVfxSchema),
+        wordVfxColor: t.Optional(wordVfxColorSchema),
         // Translation link: the keyword holding this one's other-language name,
         // merged into it and deleted (`POST /:id/link` the other way round).
         translationKeywordId: t.Optional(t.String({ format: 'uuid' })),
