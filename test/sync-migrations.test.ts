@@ -205,3 +205,46 @@ describe('word VFX migration', () => {
     }
   }, 120_000);
 });
+
+describe('chapter artwork consolidation', () => {
+  live('moves image URLs, descriptions, leases and keyword links into canonical chapters', async () => {
+    const migration = '20261017000000_chapter_context';
+    const workdir = mkdtempSync(join(tmpdir(), 'storylens-chapter-migration-'));
+    const name = `storylens_chapter_migtest_${process.pid}`;
+    let client: PrismaClient | undefined;
+    try {
+      await prepare(name, workdir, entry => entry < migration);
+      client = await seed(name, [
+        ...baseRows,
+        `INSERT INTO "File" (id, url, type, provider_image_id, delete_url, "updatedAt") VALUES ('cover-image', 'https://images.example.invalid/retained.png', 'Image', 'cover-image', '', now())`,
+        `INSERT INTO "Chapter" (id, name, number, description, "novelId", "createdAt", "updatedAt") VALUES
+          ('chapter-first', 'The shrine', 5, NULL, 'n1', '2026-10-15', now()),
+          ('chapter-duplicate', 'Shrine', 5, 'Mira reaches the shrine.', 'n1', '2026-10-16', now())`,
+        `INSERT INTO "KeywordsChapters" (id, "keywordId", "chapterId", "updatedAt") VALUES ('retained-link', 'k1', 'chapter-duplicate', now())`,
+        `INSERT INTO "ChapterCover" (id, "novelId", "chapterNumber", "imageId", "leaseToken", "leaseExpiresAt", "updatedAt") VALUES
+          ('cover-existing', 'n1', 5, 'cover-image', NULL, NULL, now()),
+          ('cover-detected', 'n1', 0, 'cover-image', NULL, NULL, now()),
+          ('cover-pending', 'n1', 6, NULL, 'retained-lease', '2027-01-01', now())`,
+      ]);
+      const result = deploy(name, workdir, () => true);
+      expect(result.exitCode, result.stderr.toString()).toBe(0);
+      const chapters = await client.chapter.findMany({ where: { novelId: 'n1' }, include: { image: true }, orderBy: { number: 'asc' } });
+      expect(chapters.map(chapter => chapter.number)).toEqual([0, 5, 6]);
+      expect(chapters.slice(0, 2).map(chapter => chapter.image?.url)).toEqual(['https://images.example.invalid/retained.png', 'https://images.example.invalid/retained.png']);
+      expect(chapters[1]?.id).toBe('chapter-first');
+      expect(chapters[1]?.context).toEqual({ schemaVersion: 1, summary: 'Mira reaches the shrine.', scenes: [], stateChanges: [] });
+      expect((await client.keywordsChapters.findUniqueOrThrow({ where: { id: 'retained-link' } })).chapterId).toBe('chapter-first');
+      expect(chapters[2]?.coverLeaseToken).toBe('retained-lease');
+      expect(chapters[2]?.coverLeaseExpiresAt?.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+      expect(await client.$queryRawUnsafe<{ table_name: string }[]>(`SELECT table_name FROM information_schema.tables WHERE table_name = 'ChapterCover'`)).toEqual([]);
+      expect(await client.$queryRawUnsafe<{ column_name: string }[]>(`SELECT column_name FROM information_schema.columns WHERE table_name = 'Chapter' AND column_name = 'description'`)).toEqual([]);
+      expect((await client.aiFeaturePrice.findUniqueOrThrow({ where: { key: 'chapter_context' } })).enabled).toBe(true);
+    } finally {
+      await client?.$disconnect();
+      const admin = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+      await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+      await admin.$disconnect();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  }, 120_000);
+});

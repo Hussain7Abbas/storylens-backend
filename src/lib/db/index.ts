@@ -9,3 +9,5 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 export * from '../../../prisma/generated/prismabox/barrel';
+
+export { PublicChapter as ChapterPlain } from '../chapter-context/public';

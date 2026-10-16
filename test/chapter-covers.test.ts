@@ -53,7 +53,7 @@ live('cancelled and expired reservations can be reclaimed without late writes re
   await call(reader, 'DELETE', `${path(6)}/claim`, { token: first.body.token });
   const second = await call<Cover>(other, 'POST', `${path(6)}/claim`);
   expect(second.body.token).toBeString();
-  await prisma.chapterCover.update({ where: { novelId_chapterNumber: { novelId, chapterNumber: 6 } }, data: { leaseExpiresAt: new Date(0) } });
+  await prisma.chapter.update({ where: { novelId_number: { novelId, number: 6 } }, data: { coverLeaseExpiresAt: new Date(0) } });
   const third = await call<Cover>(reader, 'POST', `${path(6)}/claim`);
   expect(third.body.token).toBeString();
   const image = await imageFor(other);

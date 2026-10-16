@@ -1,3 +1,4 @@
+import { chapterPublicSelect } from '@/lib/chapter-context/public';
 import { ChapterPlain, FilePlain, NovelPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
@@ -131,7 +132,8 @@ export const novels = new Elysia({
             orderBy: {
               number: 'asc',
             },
-            include: {
+            select: {
+              ...chapterPublicSelect,
               _count: {
                 select: {
                   KeywordsChapters: true,
@@ -152,7 +154,7 @@ export const novels = new Elysia({
         });
       }
 
-      return novel;
+      return { ...novel, chapters: novel.chapters.map(chapter => ({ ...chapter, description: null })) };
     },
     {
       params: t.Object({
