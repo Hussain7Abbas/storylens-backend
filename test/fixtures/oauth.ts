@@ -22,6 +22,8 @@ const fakePrisma = {
  },
  novel: owned('novel'), keyword: owned('keyword'), keywordAlias: owned('keywordAlias'),
  keywordVersion: owned('keywordVersion'), replacement: owned('replacement'), file: owned('file'),
+ userCategoryColor: { findMany: async () => [], createMany: async () => ({ count: 0 }) },
+ userNatureColor: { findMany: async () => [], createMany: async () => ({ count: 0 }) },
  session: {
   create: async () => ({}),
   findUnique: async ({ where }: { where: { token: string } }) => {

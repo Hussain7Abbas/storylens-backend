@@ -16,7 +16,7 @@ import { lockKeywordVersions } from './version-ranges';
 type Tx = Prisma.TransactionClient;
 
 const keywordInclude = {
-  // The base version (chapter 0 onwards) holds the description shown next to the name.
+  // The earliest version holds the description shown next to the name.
   versions: { orderBy: { startingChapter: 'asc' }, take: 1, select: { description: true } },
   aliases: { select: { nameAr: true, nameEn: true }, orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.KeywordInclude;
@@ -186,7 +186,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
     },
   )
 
-  // A keyword always starts with its base version (chapter 0), which holds its details.
+  // Admin-created keywords default their base version to chapter 0.
   .post(
     '/',
     async ({ prisma, authedUser, body, t }) => {

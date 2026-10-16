@@ -5,6 +5,7 @@ import { ai } from './ai';
 import { aiCloud } from './ai-cloud';
 import { billing } from './billing';
 import { chapters } from './chapters';
+import { colorPreferences } from './color-preferences';
 import { files } from './files';
 import { keywordAliases } from './keyword-aliases';
 import { keywordCategories } from './keyword-categories';
@@ -36,6 +37,7 @@ export const userApi = new Elysia({ prefix: '/api/user' })
   .use(keywordsChapters)
   .use(keywordCategories)
   .use(keywordNatures)
+  .use(colorPreferences)
   .use(files)
   .use(ai)
   .use(aiCloud)

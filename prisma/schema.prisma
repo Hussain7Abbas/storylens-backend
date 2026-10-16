@@ -120,6 +120,8 @@ model User {
   billingRequests         BillingRequest[]  @relation("BillingRequestUser")
   billingRequestsReviewed BillingRequest[]  @relation("BillingRequestReviewer")
   aiActions               AiAction[]
+  categoryColors          UserCategoryColor[]
+  natureColors            UserNatureColor[]
 }
 
 // A named set of permissions for one portal. System roles (fixed slugs) are
@@ -297,6 +299,8 @@ model KeywordCategory {
   nameEn String?
   nameAr String?
   color  String
+  // Optional decoration for highlighted text; unknown effects render as NONE.
+  effect String @default("NONE")
   // Explains when to use it; the AI keyword suggestion reads this.
   description String?
 
@@ -307,6 +311,7 @@ model KeywordCategory {
   // Relations
   keywordVersions KeywordVersion[] @relation("KeywordVersionCategories")
   keywordAliases  KeywordAlias[]   @relation("KeywordAliasCategories")
+  personalColors  UserCategoryColor[]
 }
 
 model KeywordNature {
@@ -325,6 +330,30 @@ model KeywordNature {
   // Relations
   keywordVersions KeywordVersion[] @relation("KeywordVersionNatures")
   keywordAliases  KeywordAlias[]   @relation("KeywordAliasNatures")
+  personalColors  UserNatureColor[]
+}
+
+// Account preferences have a separate full-snapshot sync, never the shared lookup feed.
+model UserCategoryColor {
+  id String @id @default(uuid())
+  userId     String
+  categoryId String
+  color      String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category   KeywordCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, categoryId])
+}
+
+model UserNatureColor {
+  id String @id @default(uuid())
+  userId   String
+  natureId String
+  color    String
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nature   KeywordNature @relation(fields: [natureId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, natureId])
 }
 
 model Keyword {

@@ -74,6 +74,7 @@ export const PUBLIC_ENDPOINTS = new Set<string>([
 
 /** User-portal writes a guest may make (everything else that writes needs a reader). */
 const GUEST_WRITES = new Set<string>([
+  'PUT /api/user/color-preferences/:kind/:id',
   'PUT /api/user/auth/me',
   'POST /api/user/auth/logout',
   'POST /api/user/ai/chapter-selectors',
@@ -129,6 +130,8 @@ export function defaultRoleSlugs(permission: Pick<PermissionDefinition, 'key' | 
  * Dashboard endpoints use their route's `detail.summary` instead.
  */
 export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
+  'GET /api/user/color-preferences/': 'View own category and nature colors',
+  'PUT /api/user/color-preferences/:kind/:id': 'Set or clear own category or nature color',
   'GET /api/user/auth/me': 'View own profile',
   'PUT /api/user/auth/me': 'Update own username and display name',
   'POST /api/user/auth/logout': 'Sign out',

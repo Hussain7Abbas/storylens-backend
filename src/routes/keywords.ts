@@ -267,6 +267,11 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			const sanitizedBody = sanitizeObject(body);
 			const { novelId, categoryId, natureId } = sanitizedBody;
 			const names = { nameAr: cleanName(body.nameAr), nameEn: cleanName(body.nameEn) };
+			const startingChapter = body.startingChapter ?? 0;
+			const endingChapter = body.endingChapter ?? null;
+			if (endingChapter !== null && endingChapter < startingChapter) {
+				throw new HttpError({ statusCode: 422, code: "VERSION_RANGE_INVALID", message: t({ en: "Ending chapter must be at or after starting chapter", ar: "يجب أن يكون فصل النهاية مساوياً لفصل البداية أو بعده" }) });
+			}
 			assertHasName(names, t);
 
 			const [category, nature, novel] = await Promise.all([
@@ -306,8 +311,8 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 								natureId,
 								imageId: sanitizedBody.imageId ?? null,
 								keywordId: kw.id,
-								startingChapter: 0,
-								endingChapter: null,
+								startingChapter,
+								endingChapter,
 								createdById: authedUser.id,
 							},
 						});
@@ -342,6 +347,8 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 			body: t.Object({
 				id: t.String({ format: "uuid" }),
 				versionId: t.String({ format: "uuid" }),
+				startingChapter: t.Optional(t.Integer({ minimum: 0, maximum: 2147483647 })),
+				endingChapter: t.Optional(t.Nullable(t.Integer({ minimum: 0, maximum: 2147483647 }))),
 				...translatedNameBody,
 				description: t.Optional(t.Nullable(t.String())),
 				descriptionAr: t.Optional(t.Nullable(t.String())),
