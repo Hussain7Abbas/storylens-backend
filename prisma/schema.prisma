@@ -130,7 +130,8 @@ model User {
   aiActions               AiAction[]
   categoryColors          UserCategoryColor[]
   natureColors            UserNatureColor[]
-  chapterCovers           ChapterCover[]
+  chapterArtwork          Chapter[] @relation("ChapterArtworkCreator")
+  chapterContexts         Chapter[] @relation("ChapterContextCreator")
 }
 
 // A named set of permissions for one portal. System roles (fixed slugs) are
@@ -251,7 +252,7 @@ model File {
   novels          Novel[]          @relation("NovelImages")
   keywordVersions KeywordVersion[] @relation("KeywordVersionImages")
   keywordAliases  KeywordAlias[]   @relation("KeywordAliasImages")
-  chapterCovers   ChapterCover[]
+  chapterArtwork  Chapter[] @relation("ChapterArtwork")
 }
 
 model Novel {
@@ -281,15 +282,30 @@ model Novel {
   chapters Chapter[] @relation("NovelChapters")
   replacements Replacement[] @relation("NovelReplacements")
   biases WebsiteNovelBias[]
-  chapterCovers ChapterCover[]
+  chapterMentions ChapterMention[]
 }
 
 model Chapter {
   id String @id @default(uuid())
 
-  name String
+  name String @default("")
   number Int
-  description String?
+  context Json?
+  contextHash String?
+  contextLanguage String?
+  contextGeneratedAt DateTime?
+  contextCreatedById String?
+  contextCreatedBy User? @relation("ChapterContextCreator", fields: [contextCreatedById], references: [id], onDelete: SetNull)
+  contextLeaseToken String?
+  contextLeaseExpiresAt DateTime?
+  contextLeaseHash String?
+  imageId String?
+  image File? @relation("ChapterArtwork", fields: [imageId], references: [id], onDelete: SetNull)
+  coverCreatedById String?
+  coverCreatedBy User? @relation("ChapterArtworkCreator", fields: [coverCreatedById], references: [id], onDelete: SetNull)
+  coverLeaseToken String?
+  coverLeaseExpiresAt DateTime?
+  mentions ChapterMention[]
 
   novelId String
   novel Novel @relation(fields: [novelId], references: [id], name: "NovelChapters", onDelete: Cascade)
@@ -301,6 +317,7 @@ model Chapter {
   // Relations
   KeywordsChapters KeywordsChapters[] @relation("KeywordsChapters")
 
+  @@unique([novelId, number])
   @@index([novelId])
 }
 
@@ -745,20 +762,19 @@ model AiCall {
   @@index([createdAt])
 }
 
-// Shared chapter artwork, independent of manually catalogued Chapter rows.
-// A short lease prevents simultaneous auto-generation by multiple readers.
-model ChapterCover {
+// Derived index of chapter mentions and explicit lasting changes. Context remains canonical JSON.
+model ChapterMention {
   id String @id @default(uuid())
+  chapterId String
+  chapter Chapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
   novelId String
   novel Novel @relation(fields: [novelId], references: [id], onDelete: Cascade)
   chapterNumber Int
-  imageId String?
-  image File? @relation(fields: [imageId], references: [id], onDelete: SetNull)
-  createdById String?
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  leaseToken String?
-  leaseExpiresAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  @@unique([novelId, chapterNumber])
+  entityKey String
+  keywordId String?
+  name String
+  state Json @default("{}")
+  @@unique([chapterId, entityKey])
+  @@index([novelId, entityKey, chapterNumber])
+  @@index([novelId, chapterNumber])
 }

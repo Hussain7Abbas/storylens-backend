@@ -20,7 +20,6 @@ export async function seedChapters(prisma: PrismaClient) {
     data: novels.flatMap((novel) =>
       Array.from({ length: PLACEHOLDER_CHAPTER_COUNT }, (_, index) => ({
         name: `الفصل ${index + 1}`,
-        description: null,
         number: index + 1,
         novelId: novel.id,
       })).filter((chapter) => !existing.has(`${chapter.novelId}:${chapter.number}`)),

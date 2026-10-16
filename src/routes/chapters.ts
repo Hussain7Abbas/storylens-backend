@@ -4,6 +4,9 @@ import {
   KeywordsChaptersPlain,
   NovelPlain,
 } from '@/lib/db';
+import { parseStoredContext } from '@/lib/chapter-context/storage';
+import { chapterPublicSelect, legacyChapterContext } from '@/lib/chapter-context/public';
+import { deprecate } from '@/lib/compat/deprecation';
 import { Elysia, t } from 'elysia';
 import { paginationSchema, sortingSchema } from '@/schemas/common';
 import { authorize } from '@/middleware/authorize';
@@ -41,7 +44,8 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
           where: { novelId },
           skip,
           take,
-          include: {
+          select: {
+            ...chapterPublicSelect,
             _count: {
               select: {
                 KeywordsChapters: true,
@@ -54,7 +58,7 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
       ]);
 
       return {
-        data: chapters,
+        data: chapters.map(chapter => ({ ...chapter, description: null })),
         total,
       };
     },
@@ -81,7 +85,8 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
     async ({ t, prisma, params: { id } }) => {
       const chapter = await prisma.chapter.findUnique({
         where: { id },
-        include: {
+        select: {
+          ...chapterPublicSelect,
           novel: true,
           KeywordsChapters: {
             include: {
@@ -101,7 +106,7 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
         });
       }
 
-      return chapter;
+      return { ...chapter, description: null };
     },
     {
       params: t.Object({
@@ -166,18 +171,18 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
         data: {
           name: body.name,
           number: body.number,
-          description: body.description,
+          ...(body.description === undefined ? {} : { context: legacyChapterContext(body.description) }),
           novelId: body.novelId,
         },
       });
 
-      return chapter;
+      return { id: chapter.id, name: chapter.name, number: chapter.number, novelId: chapter.novelId, imageId: chapter.imageId, createdAt: chapter.createdAt, updatedAt: chapter.updatedAt, description: null };
     },
     {
       body: t.Object({
         name: t.String({ minLength: 1 }),
         number: t.Number({ minimum: 1 }),
-        description: t.Optional(t.String()),
+        description: t.Optional(deprecate(t.String(), { since: '2026-10-17', removeAfter: '2027-04-30', replacement: 'Chapter context.summary' })),
         novelId: t.String({ format: 'uuid' }),
       }),
       response: {
@@ -224,16 +229,22 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
         }
       }
 
-      const chapter = await prisma.chapter.update({
-        where: { id },
-        data: {
-          name: body.name,
-          number: body.number,
-          description: body.description,
-        },
+      const chapter = await prisma.$transaction(async tx => {
+        const updated = await tx.chapter.update({
+          where: { id },
+          data: {
+            name: body.name,
+            number: body.number,
+            ...(body.description === undefined ? {} : { context: { ...(parseStoredContext(existingChapter.context) ?? legacyChapterContext(body.description)), summary: body.description } }),
+          },
+        });
+        if (body.number !== existingChapter.number) {
+          await tx.chapterMention.updateMany({ where: { chapterId: id }, data: { chapterNumber: body.number } });
+        }
+        return updated;
       });
 
-      return chapter;
+      return { id: chapter.id, name: chapter.name, number: chapter.number, novelId: chapter.novelId, imageId: chapter.imageId, createdAt: chapter.createdAt, updatedAt: chapter.updatedAt, description: null };
     },
     {
       params: t.Object({
@@ -242,7 +253,7 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
       body: t.Object({
         name: t.String({ minLength: 1 }),
         number: t.Number({ minimum: 1 }),
-        description: t.Optional(t.String()),
+        description: t.Optional(deprecate(t.String(), { since: '2026-10-17', removeAfter: '2027-04-30', replacement: 'Chapter context.summary' })),
       }),
       response: {
         200: ChapterPlain,
@@ -272,7 +283,7 @@ export const chapters = new Elysia({ prefix: '/chapters', tags: ['Chapters'] })
         where: { id },
       });
 
-      return existingChapter;
+      return { id: existingChapter.id, name: existingChapter.name, number: existingChapter.number, novelId: existingChapter.novelId, imageId: existingChapter.imageId, createdAt: existingChapter.createdAt, updatedAt: existingChapter.updatedAt, description: null };
     },
     {
       params: t.Object({

@@ -1,3 +1,4 @@
+import { chapterPublicSelect } from '@/lib/chapter-context/public';
 import { descriptionData } from '@/lib/keywords/descriptions';
 import { Elysia, t, type Static } from "elysia";
 import {
@@ -212,7 +213,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				include: {
 					...keywordInclude,
 					novel: true,
-					KeywordsChapters: { include: { chapter: true } },
+					KeywordsChapters: { include: { chapter: { select: chapterPublicSelect } } },
 					replacements: true,
 				},
 			});
@@ -228,7 +229,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				});
 			}
 
-			return keyword;
+			return { ...keyword, KeywordsChapters: keyword.KeywordsChapters.map(link => ({ ...link, chapter: { ...link.chapter, description: null } })) };
 		},
 		{
 			params: t.Object({

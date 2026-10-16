@@ -1,3 +1,4 @@
+import { chapterPublicSelect } from '@/lib/chapter-context/public';
 import {
   ChapterPlain,
   KeywordPlain,
@@ -46,7 +47,7 @@ export const keywordsChapters = new Elysia({
           take,
           include: {
             keyword: true,
-            chapter: true,
+            chapter: { select: chapterPublicSelect },
           },
           orderBy: getNestedColumnObject(sorting?.column, sorting?.direction),
         }),
@@ -54,7 +55,7 @@ export const keywordsChapters = new Elysia({
       ]);
 
       return {
-        data: relationships,
+        data: relationships.map(link => ({ ...link, chapter: { ...link.chapter, description: null } })),
         total,
       };
     },
@@ -104,7 +105,8 @@ export const keywordsChapters = new Elysia({
           include: {
             keyword: true,
             chapter: {
-              include: {
+              select: {
+                ...chapterPublicSelect,
                 novel: true,
               },
             },
@@ -117,7 +119,7 @@ export const keywordsChapters = new Elysia({
       ]);
 
       return {
-        data: relationships,
+        data: relationships.map(link => ({ ...link, chapter: { ...link.chapter, description: null } })),
         total,
       };
     },
@@ -147,7 +149,8 @@ export const keywordsChapters = new Elysia({
         include: {
           keyword: true,
           chapter: {
-            include: {
+            select: {
+              ...chapterPublicSelect,
               novel: true,
             },
           },
@@ -164,7 +167,7 @@ export const keywordsChapters = new Elysia({
         });
       }
 
-      return relationship;
+      return { ...relationship, chapter: { ...relationship.chapter, description: null } };
     },
     {
       params: t.Object({
@@ -241,11 +244,11 @@ export const keywordsChapters = new Elysia({
         },
         include: {
           keyword: true,
-          chapter: true,
+          chapter: { select: chapterPublicSelect },
         },
       });
 
-      return relationship;
+      return { ...relationship, chapter: { ...relationship.chapter, description: null } };
     },
     {
       body: t.Object({
