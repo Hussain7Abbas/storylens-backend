@@ -196,6 +196,7 @@ async function image(input: ImageInput): Promise<ImageResult> {
         model: input.model,
         prompt: input.prompt,
         aspect_ratio: input.aspectRatio,
+        ...(input.referenceImageUrls?.length ? { input_references: input.referenceImageUrls.map(url => ({ type: 'image_url', image_url: { url } })) } : {}),
         output_format: input.format,
         n: 1,
         user: input.userId,

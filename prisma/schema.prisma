@@ -130,6 +130,7 @@ model User {
   aiActions               AiAction[]
   categoryColors          UserCategoryColor[]
   natureColors            UserNatureColor[]
+  chapterCovers           ChapterCover[]
 }
 
 // A named set of permissions for one portal. System roles (fixed slugs) are
@@ -250,6 +251,7 @@ model File {
   novels          Novel[]          @relation("NovelImages")
   keywordVersions KeywordVersion[] @relation("KeywordVersionImages")
   keywordAliases  KeywordAlias[]   @relation("KeywordAliasImages")
+  chapterCovers   ChapterCover[]
 }
 
 model Novel {
@@ -279,6 +281,7 @@ model Novel {
   chapters Chapter[] @relation("NovelChapters")
   replacements Replacement[] @relation("NovelReplacements")
   biases WebsiteNovelBias[]
+  chapterCovers ChapterCover[]
 }
 
 model Chapter {
@@ -662,7 +665,7 @@ model BillingRequest {
 // One pricing record per AI feature. Rows are created by migration; the dashboard edits them.
 model AiFeaturePrice {
   // Stable contract with clients: page_summary, keyword_suggestion, chapter_extraction,
-  // character_image, novel_context, selector_detection.
+  // character_image, chapter_cover, novel_context, selector_detection.
   key String @id
 
   nameEn        String
@@ -675,7 +678,7 @@ model AiFeaturePrice {
   enabled Boolean @default(true)
 
   // Models are not per feature: text features (and the image brief) use the
-  // `AI_Text_Model` config, character_image the `AI_Image_Model` config.
+  // `AI_Text_Model` config, image features the `AI_Image_Model` config.
   maxPromptChars  Int
   maxOutputTokens Int
   sortOrder       Int @default(0)
@@ -740,4 +743,22 @@ model AiCall {
 
   @@index([actionId])
   @@index([createdAt])
+}
+
+// Shared chapter artwork, independent of manually catalogued Chapter rows.
+// A short lease prevents simultaneous auto-generation by multiple readers.
+model ChapterCover {
+  id String @id @default(uuid())
+  novelId String
+  novel Novel @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  chapterNumber Int
+  imageId String?
+  image File? @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  createdById String?
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  leaseToken String?
+  leaseExpiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([novelId, chapterNumber])
 }

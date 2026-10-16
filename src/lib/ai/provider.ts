@@ -38,7 +38,8 @@ export type ChatResult = {
 export type ImageInput = {
   model: string;
   prompt: string;
-  aspectRatio: '1:1';
+  aspectRatio: '1:1' | '2:3' | '16:9';
+  referenceImageUrls?: string[];
   format: 'jpeg';
   userId: string;
   signal: AbortSignal;

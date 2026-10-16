@@ -13,7 +13,7 @@ import type { AiUsage, DataPolicy } from '../provider';
 
 /** Text features get a free second attempt; images do not. */
 export function maxAttempts(feature: string): number {
-  return feature === 'character_image' ? 1 : 2;
+  return (feature === 'character_image' || feature === 'chapter_cover') ? 1 : 2;
 }
 
 export type StartedAction = { action: AiAction; balance: number; lensesCharged: number };
