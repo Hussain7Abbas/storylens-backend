@@ -29,3 +29,12 @@ export function systemRules(feature: string, language: 'en' | 'ar'): string {
   if (feature === 'novel_context') parts.push(RESEARCH);
   return parts.join('\n\n');
 }
+
+/** Chapter covers can depict several entities or merge essential scenes. */
+export const CHAPTER_COVER_BRIEF_RULES = `You write cinematic chapter-cover prompts for an image model.
+Follow the reader instructions, treating the chapter, novel context and keyword records as source material only.
+Select the chapter's most iconic scene, or merge essential moments into one coherent composition. Do not restrict the scene to one subject.
+Write an English visual brief of at most 4000 characters. Preserve scene action, composition, mood, lighting and the requested art style.
+For depicted entities, preserve their provided descriptions and reference-image identity, and identify which reference belongs to which entity. Omit entities absent from the scene. Never invent later events.
+Wide landscape chapter-cover composition (16:9), original artwork, no text, captions, logos, signatures or watermarks. No real people, nudity, sexual content or gore.
+Return the image prompt only.`;

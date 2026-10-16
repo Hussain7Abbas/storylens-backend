@@ -169,3 +169,39 @@ describe('offline-first migrations', () => {
     }
   }, 120_000);
 });
+
+describe('word VFX migration', () => {
+  live('preserves saved keyword and alias effects while adding nullable colors and enum storage', async () => {
+    const migration = '20261016163040_word_vfx_color';
+    const workdir = mkdtempSync(join(tmpdir(), 'storylens-word-vfx-migration-'));
+    const name = `storylens_vfx_migtest_${process.pid}`;
+    let client: PrismaClient | undefined;
+    try {
+      await prepare(name, workdir, entry => entry < migration);
+      client = await seed(name, [
+        ...baseRows,
+        `UPDATE "Keyword" SET "wordVfx" = 'SPARKLES' WHERE id = 'k1'`,
+        `INSERT INTO "KeywordAlias" (id, "nameEn", "keywordId", "wordVfx", "updatedAt") VALUES ('vfx-alias', 'Sword', 'k1', 'HEAT', now())`,
+      ]);
+      expect(deploy(name, workdir, entry => entry <= migration).exitCode).toBe(0);
+      const keyword = await client.$queryRawUnsafe<{ wordVfx: string; wordVfxColor: string | null }[]>(
+        `SELECT "wordVfx", "wordVfxColor" FROM "Keyword" WHERE id = 'k1'`,
+      );
+      const alias = await client.$queryRawUnsafe<{ wordVfx: string; wordVfxColor: string | null }[]>(
+        `SELECT "wordVfx", "wordVfxColor" FROM "KeywordAlias" WHERE id = 'vfx-alias'`,
+      );
+      expect(keyword).toEqual([{ wordVfx: 'SPARKLES', wordVfxColor: null }]);
+      expect(alias).toEqual([{ wordVfx: 'HEAT', wordVfxColor: null }]);
+      const columns = await client.$queryRawUnsafe<{ table_name: string; udt_name: string }[]>(
+        `SELECT table_name, udt_name FROM information_schema.columns WHERE table_name IN ('Keyword', 'KeywordAlias') AND column_name = 'wordVfx' ORDER BY table_name`,
+      );
+      expect(columns).toEqual([{ table_name: 'Keyword', udt_name: 'WordVfx' }, { table_name: 'KeywordAlias', udt_name: 'WordVfx' }]);
+    } finally {
+      await client?.$disconnect();
+      const admin = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+      await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+      await admin.$disconnect();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  }, 120_000);
+});

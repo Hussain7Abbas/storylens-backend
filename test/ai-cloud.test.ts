@@ -404,3 +404,17 @@ describe('stream', () => {
     expect(frames.at(-1)).toEqual({ type: 'result', output: 'done' });
   });
 });
+
+
+live('chapter covers use a scene brief, landscape ratio, reference images and their own charge', async () => {
+  const actor = await newReader(10);
+  const referenceImageUrls = ['https://images.example.invalid/mira.jpg'];
+  const response = await post(actor, 'images', { actionId: crypto.randomUUID(), feature: 'chapter_cover', prompt: 'Mira raises her sword at the burning bridge.', referenceImageUrls });
+  expect(response.last?.type).toBe('result');
+  expect(ai.chats.at(-1)?.system).toContain('most iconic scene');
+  expect(ai.images.at(-1)?.aspectRatio).toBe('16:9');
+  expect(ai.images.at(-1)?.referenceImageUrls).toEqual(referenceImageUrls);
+  expect(await balanceOf(actor)).toBe(7);
+  expect((await post(actor, 'prompts', promptBody({ feature: 'chapter_cover' }))).json.code).toBe('AI_FEATURE_NOT_FOUND');
+  expect((await post(actor, 'images', { actionId: crypto.randomUUID(), feature: 'chapter_cover', prompt: 'Scene', referenceImageUrls: ['file:///private/image.jpg'] })).status).toBe(422);
+});

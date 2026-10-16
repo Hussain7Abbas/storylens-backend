@@ -13,7 +13,7 @@ import { aiProviderConfigured } from '../provider';
 export type Modality = 'text' | 'image';
 
 export function modalityOf(feature: string): Modality {
-  return feature === 'character_image' ? 'image' : 'text';
+  return (feature === 'character_image' || feature === 'chapter_cover') ? 'image' : 'text';
 }
 
 export function assertCloudAvailable(config: BillingConfig): void {

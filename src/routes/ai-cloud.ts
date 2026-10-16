@@ -12,7 +12,7 @@ import {
   featureFor,
 } from '@/lib/ai/cloud/limits';
 import { type Frame, ndjsonResponse, wantsStream } from '@/lib/ai/cloud/stream';
-import { IMAGE_BRIEF_RULES, systemRules } from '@/lib/ai/cloud/system-rules';
+import { IMAGE_BRIEF_RULES, CHAPTER_COVER_BRIEF_RULES, systemRules } from '@/lib/ai/cloud/system-rules';
 import { setCreditsExhaustedHandler } from '@/lib/ai/openrouter-provider';
 import { AiProviderError, type AiUsage, getAiProvider } from '@/lib/ai/provider';
 import type { AuthUserPayload } from '@/lib/auth/session';
@@ -152,7 +152,7 @@ async function runText(
 /** A short brief on the text model, then the image. Never throws. */
 async function runImage(
   prisma: PrismaClient,
-  input: { user: AuthUserPayload; price: AiFeaturePrice; textModel: string; imageModel: string; actionId: string; prompt: string; signal: AbortSignal },
+  input: { user: AuthUserPayload; price: AiFeaturePrice; textModel: string; imageModel: string; actionId: string; prompt: string; referenceImageUrls?: string[]; signal: AbortSignal },
   balance: number,
   lensesCharged: number,
 ): Promise<Outcome> {
@@ -166,14 +166,14 @@ async function runImage(
   try {
     const brief = await getAiProvider().chat({
       model: briefModel,
-      system: IMAGE_BRIEF_RULES,
+      system: price.key === 'chapter_cover' ? CHAPTER_COVER_BRIEF_RULES : IMAGE_BRIEF_RULES,
       prompt: input.prompt,
       maxTokens: price.maxOutputTokens,
       userId: input.user.id,
       signal: input.signal,
     });
     calls.push({ attempt: 1, step, model, status: 'succeeded', usage: brief.usage, durationMs: performance.now() - started, providerId: brief.providerId, dataPolicy: brief.dataPolicy });
-    const imagePrompt = brief.text.slice(0, IMAGE_PROMPT_CHARS);
+    const imagePrompt = brief.text.slice(0, price.key === 'chapter_cover' ? 4000 : IMAGE_PROMPT_CHARS);
 
     started = performance.now();
     step = 'main';
@@ -181,7 +181,8 @@ async function runImage(
     const image = await getAiProvider().image({
       model: input.imageModel,
       prompt: imagePrompt,
-      aspectRatio: '1:1',
+      aspectRatio: price.key === 'chapter_cover' ? '16:9' : '1:1',
+      referenceImageUrls: input.referenceImageUrls,
       format: 'jpeg',
       userId: input.user.id,
       signal: input.signal,
@@ -319,7 +320,7 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
         () =>
           runImage(
             prisma,
-            { user: authedUser, price, textModel: config.textModel, imageModel: config.imageModel, actionId: body.actionId, prompt: body.prompt, signal: request.signal },
+            { user: authedUser, price, textModel: config.textModel, imageModel: config.imageModel, actionId: body.actionId, prompt: body.prompt, referenceImageUrls: body.referenceImageUrls, signal: request.signal },
             started.balance,
             started.lensesCharged,
           ),
@@ -328,11 +329,12 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
     {
       body: t.Object({
         actionId: t.String({ format: 'uuid' }),
-        feature: t.Literal('character_image'),
+        feature: t.Union([t.Literal('character_image'), t.Literal('chapter_cover')]),
+        referenceImageUrls: t.Optional(t.Array(t.String({ pattern: '^https?://[^\\s]+$', maxLength: 2048 }), { maxItems: 8 })),
         prompt: t.String({ minLength: 1, maxLength: 400_000 }),
       }),
       detail: {
-        summary: 'Draw a character image with Story Lens Cloud AI',
+        summary: 'Draw a character image or chapter cover with Story Lens Cloud AI',
         description:
           'Streams NDJSON frames like `/ai/prompts`; the `result` frame carries `mimeType`, base64 `data` and `revisedPrompt`.',
       },

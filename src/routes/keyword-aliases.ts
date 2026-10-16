@@ -6,6 +6,7 @@ import { mergeTranslationAlias } from "@/lib/keywords/merge";
 import { assertNotStale, compareAndSwap } from "@/lib/sync/precondition";
 import { createWithReplay, findReplay } from "@/lib/sync/replay";
 import { assertOwnsAnyOf, authorize } from "@/middleware/authorize";
+import { wordVfxSchema, wordVfxColorSchema } from '@/schemas/word-vfx';
 import { paginationSchema, sortingSchema, staleWriteSchema } from "@/schemas/common";
 import { setup } from "@/setup";
 import { cleanKeywordName } from "@/utils/arabic";
@@ -145,6 +146,8 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 								...descriptionData(sanitizedBody, lang),
 								matchingType: sanitizedBody.matchingType ?? "FULL",
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters ?? true,
+								wordVfx: sanitizedBody.wordVfx ?? "NONE",
+								wordVfxColor: sanitizedBody.wordVfxColor ?? null,
 								categoryId: sanitizedBody.categoryId ?? null,
 								natureId: sanitizedBody.natureId ?? null,
 								imageId: sanitizedBody.imageId ?? null,
@@ -170,6 +173,8 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				descriptionEn: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+				wordVfx: t.Optional(wordVfxSchema),
+				wordVfxColor: t.Optional(wordVfxColorSchema),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
@@ -242,6 +247,8 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 								...descriptionData(sanitizedBody, lang),
 								matchingType: sanitizedBody.matchingType,
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
+								wordVfx: sanitizedBody.wordVfx,
+								wordVfxColor: sanitizedBody.wordVfxColor,
 								categoryId: sanitizedBody.categoryId,
 								natureId: sanitizedBody.natureId,
 								imageId: sanitizedBody.imageId,
@@ -264,6 +271,8 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				descriptionEn: t.Optional(t.Nullable(t.String())),
 				matchingType: t.Optional(MatchingType),
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
+				wordVfx: t.Optional(wordVfxSchema),
+				wordVfxColor: t.Optional(wordVfxColorSchema),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
