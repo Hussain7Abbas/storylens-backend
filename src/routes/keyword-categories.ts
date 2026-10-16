@@ -17,6 +17,8 @@ import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 import { getNestedColumnObject, parsePaginationProps } from '@/utils/helpers';
 
+const categoryEffectSchema = t.Union(['NONE', 'SPARKLES', 'HEAT', 'SHAKING', 'GLITCHING'].map((effect) => t.Literal(effect)));
+
 export const keywordCategories = new Elysia({
   prefix: '/keyword-categories',
   tags: ['KeywordCategories'],
@@ -109,7 +111,7 @@ export const keywordCategories = new Elysia({
     '/',
     async ({ t, prisma, body }) => {
       const findCategory = () => prisma.keywordCategory.findUnique({ where: { id: body.id } });
-      const isReplay = (row: CategoryRow) => isLookupReplay(row, body);
+      const isReplay = (row: CategoryRow) => isLookupReplay(row, body) && (body.effect === undefined || row.effect === body.effect);
 
       const replay = await findReplay(findCategory, isReplay, t);
       if (replay) return replay;
@@ -125,6 +127,7 @@ export const keywordCategories = new Elysia({
               id: body.id,
               ...names,
               color: body.color,
+              effect: body.effect,
               description: body.description,
             },
           }),
@@ -139,6 +142,7 @@ export const keywordCategories = new Elysia({
         nameEn: t.Optional(t.Nullable(t.String())),
         nameAr: t.Optional(t.Nullable(t.String())),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
+        effect: t.Optional(categoryEffectSchema),
         description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: {
@@ -179,6 +183,7 @@ export const keywordCategories = new Elysia({
         data: {
           ...names,
           color: body.color,
+          effect: body.effect,
           description: body.description,
         },
       }), () => prisma.keywordCategory.findUniqueOrThrow({ where: { id } }), t);
@@ -192,6 +197,7 @@ export const keywordCategories = new Elysia({
         nameEn: t.Optional(t.Nullable(t.String())),
         nameAr: t.Optional(t.Nullable(t.String())),
         color: t.Optional(t.String({ pattern: '^#[0-9A-Fa-f]{6}$' })),
+        effect: t.Optional(categoryEffectSchema),
         description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: {

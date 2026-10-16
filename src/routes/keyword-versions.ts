@@ -129,7 +129,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 					prisma.$transaction(async (tx) => {
 						await lockKeywordVersions(tx, keywordId);
 						const latestVersion = await tx.keywordVersion.findFirst({
-							where: { keywordId, endingChapter: null, id: { not: body.id } },
+							where: { keywordId, id: { not: body.id } },
 							orderBy: { startingChapter: "desc" },
 						});
 						if (latestVersion && startingChapter <= latestVersion.startingChapter) {
@@ -139,7 +139,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 								message: t({ en: "startingChapter must be greater than the current latest version", ar: "يجب أن يكون startingChapter أكبر من النسخة الأخيرة الحالية" }),
 							});
 						}
-						if (latestVersion) {
+						if (latestVersion && (latestVersion.endingChapter === null || latestVersion.endingChapter >= startingChapter)) {
 							await tx.keywordVersion.update({
 								where: { id: latestVersion.id },
 								data: { endingChapter: startingChapter - 1 },

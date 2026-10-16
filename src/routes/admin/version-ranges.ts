@@ -23,9 +23,7 @@ export function versionEditNeighbors(
   if (index < 0) throw new HttpError({ statusCode: 404, message: 'Version not found' });
   const previous = versions[index - 1];
   const next = versions[index + 1];
-  if (!previous && startingChapter !== 0) {
-    throw new HttpError({ statusCode: 409, message: 'The base version must start at chapter 0' });
-  }
+
   if (previous && startingChapter <= previous.startingChapter) {
     throw new HttpError({ statusCode: 409, message: 'A version must start after the preceding version' });
   }

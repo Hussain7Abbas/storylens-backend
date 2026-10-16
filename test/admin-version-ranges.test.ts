@@ -18,7 +18,8 @@ describe('admin version range edits', () => {
     expect(() => versionEditNeighbors(versions, 'middle', 20, 20)).toThrow();
   });
 
-  it('keeps the base at chapter zero', () => {
-    expect(() => versionEditNeighbors(versions, 'base', 1, 9)).toThrow();
+  it('allows a nonzero base while preserving the following range', () => {
+    expect(versionEditNeighbors(versions, 'base', 1, 9).next?.id).toBe('middle');
+    expect(() => versionEditNeighbors(versions, 'base', 10, 10)).toThrow();
   });
 });

@@ -46,6 +46,13 @@ export async function mergeGuestInto(
     await tx.keywordVersion.updateMany({ where: from, data: to });
     await tx.replacement.updateMany({ where: from, data: to });
     await tx.file.updateMany({ where: { userId: guestId }, data: { userId } });
+    // Retain the member's existing choices; bring across the guest's other colors.
+    const [categoryColors, natureColors] = await Promise.all([
+      tx.userCategoryColor.findMany({ where: { userId: guestId }, select: { categoryId: true, color: true } }),
+      tx.userNatureColor.findMany({ where: { userId: guestId }, select: { natureId: true, color: true } }),
+    ]);
+    await tx.userCategoryColor.createMany({ data: categoryColors.map(row => ({ ...row, userId })), skipDuplicates: true });
+    await tx.userNatureColor.createMany({ data: natureColors.map(row => ({ ...row, userId })), skipDuplicates: true });
     // Guests never get lenses, but keep any the guest somehow holds; its own
     // ledger rows go with it.
     const guest = await tx.user.findUnique({ where: { id: guestId }, select: { lensBalance: true } });
