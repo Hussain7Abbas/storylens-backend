@@ -23,7 +23,7 @@ export function parseUsdToMicros(text: string): number | null {
 
 /** `lenses × price`, rounded half-up to cents. */
 export function priceCents(lenses: number, priceMicros: number): number {
-  return Math.floor((lenses * priceMicros + 5_000) / 10_000);
+  return Number((BigInt(lenses) * BigInt(priceMicros) + BigInt(5_000)) / BigInt(10_000));
 }
 
 /** `10000` → `"0.010000"`. */

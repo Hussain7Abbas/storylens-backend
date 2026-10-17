@@ -152,6 +152,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 								mainThemeColor: sanitizedBody.mainThemeColor ?? null,
 								categoryId: sanitizedBody.categoryId ?? null,
 								natureId: sanitizedBody.natureId ?? null,
+								imagePrompt: sanitizedBody.imagePrompt ?? null,
 								imageId: sanitizedBody.imageId ?? null,
 								overrideStyle: sanitizedBody.overrideStyle ?? false,
 								keywordId,
@@ -180,6 +181,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				mainThemeColor: t.Optional(mainThemeColorSchema),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+				imagePrompt: t.Optional(t.Nullable(t.String({ maxLength: 180000 }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				overrideStyle: t.Optional(t.Boolean()),
 				// Translation link: the alias of the same keyword that holds this one's
@@ -255,6 +257,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 								mainThemeColor: sanitizedBody.mainThemeColor,
 								categoryId: sanitizedBody.categoryId,
 								natureId: sanitizedBody.natureId,
+								imagePrompt: sanitizedBody.imagePrompt,
 								imageId: sanitizedBody.imageId,
 								overrideStyle: sanitizedBody.overrideStyle,
 							},
@@ -280,6 +283,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				mainThemeColor: t.Optional(mainThemeColorSchema),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
+				imagePrompt: t.Optional(t.Nullable(t.String({ maxLength: 180000 }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				overrideStyle: t.Optional(t.Boolean()),
 				// Translation link: the alias of the same keyword that holds this one's

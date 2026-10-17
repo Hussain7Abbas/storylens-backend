@@ -448,6 +448,7 @@ model KeywordAlias {
   natureId String?
   nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordAliasNatures")
 
+  imagePrompt String?
   imageId String?
   image   File?   @relation(fields: [imageId], references: [id], name: "KeywordAliasImages")
 
@@ -480,6 +481,7 @@ model KeywordVersion {
   natureId String?
   nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordVersionNatures")
 
+  imagePrompt String?
   imageId String?
   image   File?   @relation(fields: [imageId], references: [id], name: "KeywordVersionImages")
 
@@ -660,7 +662,7 @@ model BillingRequest {
   lenses       Int
   // Quoted price per lens, and lenses × price rounded half-up to cents.
   unitPriceUsd Decimal @db.Decimal(12, 6)
-  totalUsd     Decimal @db.Decimal(12, 2)
+  totalUsd     Decimal @db.Decimal(16, 2)
 
   status BillingRequestStatus @default(PENDING)
   // Where the owner contacts the reader to arrange payment: a WhatsApp number in

@@ -38,5 +38,6 @@ export const styleBody = {
   descriptionEn: t.Optional(t.Nullable(t.String({ maxLength: 5000 }))),
   categoryId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
   natureId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
+  imagePrompt: t.Optional(t.Nullable(t.String({ maxLength: 180000 }))),
   imageId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
 };
