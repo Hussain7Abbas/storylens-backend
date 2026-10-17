@@ -61,3 +61,26 @@ live('cancelled and expired reservations can be reclaimed without late writes re
   expect((await call(reader, 'GET', path(-1))).status).toBe(422);
   expect((await call(reader, 'GET', path(1.5))).status).toBe(422);
 });
+
+
+live('explicit regeneration keeps existing artwork, enforces ownership and serializes replacements', async () => {
+  const chapter = 7;
+  const first = await call<Cover>(reader, 'POST', `${path(chapter)}/claim`);
+  const oldImage = await imageFor(reader);
+  await call(reader, 'PUT', path(chapter), { token: first.body.token, imageId: oldImage.id });
+  expect((await call<Cover>(reader, 'POST', `${path(chapter)}/claim`)).body.token).toBeNull();
+  expect((await call(other, 'POST', `${path(chapter)}/claim`, { regenerate: true })).status).toBe(403);
+  const claims = await Promise.all([1, 2].map(() => call<Cover>(reader, 'POST', `${path(chapter)}/claim`, { regenerate: true })));
+  expect(claims.filter(result => result.body.token)).toHaveLength(1);
+  const token = claims.find(result => result.body.token)?.body.token;
+  const during = await call<Cover>(guest, 'GET', path(chapter));
+  expect(during.body.image?.id).toBe(oldImage.id);
+  expect(during.body.generating).toBe(true);
+  await call(reader, 'DELETE', `${path(chapter)}/claim`, { token });
+  expect((await call<Cover>(guest, 'GET', path(chapter))).body).toEqual({ image: { id: oldImage.id, url: oldImage.url }, generating: false });
+  const next = await call<Cover>(reader, 'POST', `${path(chapter)}/claim`, { regenerate: true });
+  const replacement = await imageFor(reader);
+  expect((await call(reader, 'PUT', path(chapter), { token, imageId: replacement.id })).status).toBe(409);
+  expect((await call(reader, 'PUT', path(chapter), { token: next.body.token, imageId: replacement.id })).status).toBe(200);
+  expect((await call<Cover>(guest, 'GET', path(chapter))).body.image?.id).toBe(replacement.id);
+});

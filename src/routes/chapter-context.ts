@@ -90,7 +90,7 @@ export const chapterContexts = new Elysia({ prefix: '/chapter-context', tags: ['
         const row = await tx.chapter.findUnique({ where });
         if (
           parseStoredContext(row?.context) &&
-          (body.onlyIfMissing || row?.contextHash === body.contentHash)
+          (body.onlyIfMissing || (!body.regenerate && row?.contextHash === body.contentHash))
         )
           return { token: null, ready: true };
         if (
@@ -119,7 +119,7 @@ export const chapterContexts = new Elysia({ prefix: '/chapter-context', tags: ['
     },
     {
       params,
-      body: t.Composite([leaseBody, t.Object({ onlyIfMissing: t.Optional(t.Boolean()) })]),
+      body: t.Composite([leaseBody, t.Object({ onlyIfMissing: t.Optional(t.Boolean()), regenerate: t.Optional(t.Boolean()) })]),
       response: t.Object({ token: t.Nullable(t.String()), ready: t.Boolean() }),
       detail: { summary: 'Reserve generation of a missing or changed chapter context' },
     },
@@ -146,6 +146,7 @@ export const chapterContexts = new Elysia({ prefix: '/chapter-context', tags: ['
         if (
           row?.contextHash === body.contentHash &&
           row.contextCreatedById === authedUser.id &&
+          row.contextLeaseToken !== body.token &&
           parseStoredContext(row.context)
         )
           return;
