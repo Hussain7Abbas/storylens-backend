@@ -16,6 +16,11 @@ const modelSchema = t.Object({
   imageUsd: t.Nullable(t.Number()),
   imageTokens: t.Nullable(t.Number()),
   free: t.Boolean(),
+  reasoningSupported: t.Optional(t.Boolean()),
+  reasoningEfforts: t.Optional(t.Nullable(t.Array(t.String()))),
+  reasoningMandatory: t.Optional(t.Boolean()),
+  defaultReasoningEffort: t.Optional(t.Nullable(t.String())),
+  imageQualities: t.Optional(t.Array(t.String())),
 });
 
 /**

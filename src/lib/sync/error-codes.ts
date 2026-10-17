@@ -23,6 +23,7 @@ export const SYNC_ERROR_CODES = [
   'VERSION_BASE_PROTECTED',
   'CATEGORY_IN_USE',
   'NATURE_IN_USE',
+  'LOOKUP_REPLACEMENT_INVALID',
   'CURSOR_EXPIRED',
   // Translation links (`src/lib/keywords/merge.ts`).
   'TRANSLATION_SELF',

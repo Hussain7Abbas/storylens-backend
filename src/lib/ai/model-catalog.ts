@@ -7,6 +7,7 @@ import { z } from 'zod';
  */
 
 const MODELS_URL = 'https://openrouter.ai/api/v1/models';
+const IMAGE_MODELS_URL = 'https://openrouter.ai/api/v1/images/models';
 const CACHE_MS = 10 * 60 * 1000;
 
 /**
@@ -26,6 +27,12 @@ const modelSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
   context_length: z.number().nullish(),
+  supported_parameters: z.array(z.string()).optional(),
+  reasoning: z.object({
+    supported_efforts: z.array(z.string()).nullish(),
+    mandatory: z.boolean().optional(),
+    default_effort: z.string().nullish(),
+  }).nullish(),
   architecture: z
     .object({
       input_modalities: z.array(z.string()).nullish(),
@@ -62,6 +69,11 @@ export type CatalogModel = {
   /** Image models: the image tokens assumed for `imageUsd`. */
   imageTokens: number | null;
   free: boolean;
+  reasoningSupported: boolean;
+  reasoningEfforts: string[] | null;
+  reasoningMandatory: boolean;
+  defaultReasoningEffort: string | null;
+  imageQualities: string[];
 };
 
 const usd = (value: string | number | null | undefined): number | null => {
@@ -92,6 +104,11 @@ export function toCatalogModel(raw: unknown): CatalogModel | null {
     webSearchUsd: usd(model.pricing?.web_search),
     imageUsd: imageToken === null || tokens === null ? null : imageToken * tokens,
     imageTokens: tokens,
+    reasoningSupported: !!model.reasoning || (model.supported_parameters ?? []).includes('reasoning'),
+    reasoningEfforts: model.reasoning?.supported_efforts ?? (model.reasoning || (model.supported_parameters ?? []).includes('reasoning') ? null : []),
+    reasoningMandatory: model.reasoning?.mandatory ?? false,
+    defaultReasoningEffort: model.reasoning?.default_effort ?? null,
+    imageQualities: [],
     free: prompt === 0 && completion === 0 && request === 0 && !imageToken,
   };
 }
@@ -121,12 +138,21 @@ export async function getModelCatalog(
   { refresh = false, fetcher = fetch }: { refresh?: boolean; fetcher?: typeof fetch } = {},
 ): Promise<ModelCatalog> {
   if (!refresh && cached && Date.now() - cached.at < CACHE_MS) return cached.catalog;
-  const [all, images] = await Promise.all([list(MODELS_URL, fetcher), list(`${MODELS_URL}?output_modalities=image`, fetcher)]);
+  const [all, images, imageOptions] = await Promise.all([
+    list(MODELS_URL, fetcher), list(`${MODELS_URL}?output_modalities=image`, fetcher),
+    list(IMAGE_MODELS_URL, fetcher),
+  ]);
+  const qualitySchema = z.object({id: z.string(), supported_parameters: z.object({quality: z.object({values: z.array(z.string())}).optional()}).optional()});
+  const qualities = new Map(imageOptions.flatMap(raw => {
+    const parsed = qualitySchema.safeParse(raw);
+    return parsed.success ? [[parsed.data.id, parsed.data.supported_parameters?.quality?.values ?? []] as const] : [];
+  }));
   const catalog: ModelCatalog = {
     text: all.filter(isTextModel).map(toCatalogModel).filter((model): model is CatalogModel => model !== null).sort(byName),
     image: images
       .map(toCatalogModel)
       .filter((model): model is CatalogModel => model !== null && model.imageUsd !== null)
+      .map(model => ({...model, imageQualities: qualities.get(model.id) ?? []}))
       .sort(byName),
     fetchedAt: new Date().toISOString(),
   };

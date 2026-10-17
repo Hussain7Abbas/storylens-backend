@@ -1,3 +1,4 @@
+import { deleteLookup } from '@/lib/sync/delete-lookup';
 import { Elysia, t } from 'elysia';
 import { KeywordNaturePlain } from '@/lib/db';
 import type { PrismaClient } from '@prisma/client';
@@ -65,6 +66,7 @@ export const keywordNatures = new Elysia({
           _count: {
             select: {
               keywordVersions: true,
+              keywordAliases: true,
             },
           },
         },
@@ -88,7 +90,7 @@ export const keywordNatures = new Elysia({
         200: t.Composite([
           KeywordNaturePlain,
           t.Object({
-            _count: t.Object({ keywordVersions: t.Number() }),
+            _count: t.Object({ keywordVersions: t.Number(), keywordAliases: t.Number() }),
           }),
         ]),
       },
@@ -193,51 +195,17 @@ export const keywordNatures = new Elysia({
     },
   )
 
-  // Delete keyword nature (moderator by default); refused while a version or alias uses it
-  .delete(
-    '/:id',
-    async ({ t, prisma, params: { id } }) => {
-      const existing = await prisma.keywordNature.findUnique({
-        where: { id },
-        include: {
-          _count: {
-            select: {
-              keywordVersions: true,
-              keywordAliases: true,
-            },
-          },
-        },
-      });
-
-      if (!existing) throw notFound(t);
-
-      if (existing._count.keywordVersions > 0 || existing._count.keywordAliases > 0) {
-        throw new HttpError({
-          statusCode: 400,
-          code: 'NATURE_IN_USE',
-          message: t({
-            en: 'Cannot delete nature with keywords',
-            ar: 'لا يمكن حذف طبيعة تحتوي على كلمات مفتاحية',
-          }),
-        });
-      }
-
-      await prisma.keywordNature.delete({
-        where: { id },
-      });
-
-      const { _count: _usage, ...nature } = existing;
-      return nature;
-    },
-    {
-      params: t.Object({
-        id: t.String({ format: 'uuid' }),
-      }),
-      response: {
-        200: KeywordNaturePlain,
-      },
-    },
-  );
+  // Delete, optionally moving every linked version/alias in the same transaction.
+  .delete('/:id', async ({ t, prisma, params: { id }, query: { replacementId } }) => {
+    const existing = await prisma.keywordNature.findUnique({ where: { id } });
+    if (!existing) throw notFound(t);
+    await deleteLookup(prisma, 'keywordNature', id, replacementId, t);
+    return existing;
+  }, {
+    params: t.Object({ id: t.String({ format: 'uuid' }) }),
+    query: t.Object({ replacementId: t.Optional(t.String({ format: 'uuid' })) }),
+    response: { 200: KeywordNaturePlain },
+  });
 
 type NatureRow = Awaited<ReturnType<PrismaClient['keywordNature']['findUniqueOrThrow']>>;
 type Translate = (messages: { en: string; ar: string }) => string;

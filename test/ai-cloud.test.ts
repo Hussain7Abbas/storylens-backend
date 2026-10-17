@@ -277,14 +277,21 @@ describe('features', () => {
 
   live('uses the text and image models chosen in the configs', async () => {
     await setConfig('AI_Text_Model', 'deepseek/deepseek-v4-flash');
+    await setConfig('AI_Reasoning_Effort', 'low');
+    await setConfig('AI_Reasoning_Token_Allowance', '2048');
+    await setConfig('AI_Image_Quality', 'high');
     await setConfig('AI_Image_Model', 'black-forest-labs/flux.2-pro');
     const user = await newReader(3);
     const before = ai.chats.length;
     await post(reader, 'prompts', promptBody({ feature: 'selector_detection' }));
-    expect(ai.chats[before]?.model).toBe('deepseek/deepseek-v4-flash');
+    expect(ai.chats[before]).toMatchObject({model:'deepseek/deepseek-v4-flash',reasoningEffort:'low',reasoningTokenAllowance:2048});
     await post(user, 'images', { actionId: crypto.randomUUID(), feature: 'character_image', prompt: 'Brief.' });
     expect(ai.chats.at(-1)?.model).toBe('deepseek/deepseek-v4-flash');
-    expect(ai.images.at(-1)?.model).toBe('black-forest-labs/flux.2-pro');
+    expect(ai.chats.at(-1)).toMatchObject({reasoningEffort:'low',reasoningTokenAllowance:2048});
+    expect(ai.images.at(-1)).toMatchObject({model:'black-forest-labs/flux.2-pro',quality:'high'});
+    await setConfig('AI_Reasoning_Effort', 'auto');
+    await setConfig('AI_Reasoning_Token_Allowance', '4096');
+    await setConfig('AI_Image_Quality', 'auto');
     await setConfig('AI_Text_Model', 'google/gemini-2.5-flash');
     await setConfig('AI_Image_Model', 'bytedance-seed/seedream-5-0-flash');
   });

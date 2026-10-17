@@ -1,3 +1,5 @@
+import { getModelCatalog } from './model-catalog';
+import { effectiveEffort, effectiveQuality } from './generation-settings';
 import { z } from 'zod';
 import { env } from '@/env';
 import {
@@ -153,6 +155,11 @@ function aborted(error: unknown, timedOut: () => boolean): AiProviderError | nul
 async function chat(input: ChatInput): Promise<ChatResult> {
   const { signal, timedOut } = withTimeout(input.signal, input.webSearch ? RESEARCH_TIMEOUT_MS : CHAT_TIMEOUT_MS);
   try {
+    const catalog = await getModelCatalog().catch(() => undefined);
+    const model = catalog?.text.find(row => row.id === input.model);
+    const effort = effectiveEffort(input.reasoningEffort ?? 'auto', model);
+    const reasoning = model?.reasoningSupported !== false;
+    const allowance = reasoning && effort !== 'none' ? (input.reasoningTokenAllowance ?? 4096) : 0;
     const { response, dataPolicy } = await post(
       '/chat/completions',
       {
@@ -161,9 +168,8 @@ async function chat(input: ChatInput): Promise<ChatResult> {
           { role: 'system', content: input.system },
           { role: 'user', content: input.prompt },
         ],
-        max_tokens: input.maxTokens,
-        // Gemini 2.5 Flash bills thinking as output; these features do not need it.
-        reasoning: { effort: 'none', exclude: true },
+        max_tokens: input.maxTokens + allowance,
+        ...(reasoning ? { reasoning: { ...(effort === 'auto' ? {} : { effort }), exclude: true } } : {}),
         usage: { include: true },
         user: input.userId,
         ...(input.webSearch ? { plugins: [{ id: 'web', engine: 'exa', max_results: input.webSearch.maxResults }] } : {}),
@@ -190,12 +196,16 @@ async function chat(input: ChatInput): Promise<ChatResult> {
 async function image(input: ImageInput): Promise<ImageResult> {
   const { signal, timedOut } = withTimeout(input.signal, IMAGE_TIMEOUT_MS);
   try {
+    const catalog = await getModelCatalog().catch(() => undefined);
+    const model = catalog?.image.find(row => row.id === input.model);
+    const quality = effectiveQuality(input.quality ?? 'auto', model?.imageQualities);
     const { response, dataPolicy } = await post(
       '/images',
       {
         model: input.model,
         prompt: input.prompt,
         aspect_ratio: input.aspectRatio,
+        ...(quality === 'auto' ? {} : { quality }),
         ...(input.referenceImageUrls?.length ? { input_references: input.referenceImageUrls.map(url => ({ type: 'image_url', image_url: { url } })) } : {}),
         output_format: input.format,
         n: 1,

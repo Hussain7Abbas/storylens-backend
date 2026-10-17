@@ -45,6 +45,9 @@ describe('billing config', () => {
       { key: 'Lens_Request_Min', value: '100' },
       { key: 'AI_Cloud_Enabled', value: 'true' },
       { key: 'AI_Daily_Spend_Cap_USD', value: '5' },
+      { key: 'AI_Reasoning_Effort', value: 'medium' },
+      { key: 'AI_Reasoning_Token_Allowance', value: '8192' },
+      { key: 'AI_Image_Quality', value: 'high' },
     ]);
     expect(config).toMatchObject({
       lensPriceMicros: 10_000,
@@ -54,6 +57,9 @@ describe('billing config', () => {
       pendingMax: 3,
       cloudAiEnabled: true,
       dailySpendCapMicros: 5_000_000,
+      reasoningEffort: 'medium',
+      reasoningTokenAllowance: 8192,
+      imageQuality: 'high',
       readerMaxRunning: 3,
       readerMaxPer10Min: 30,
     });
@@ -70,6 +76,8 @@ describe('billing config', () => {
     expect(config.cloudAiEnabled).toBe(false);
     expect(config.dailySpendCapMicros).toBeNull();
     expect(parseBillingConfig([]).lensPriceMicros).toBeNull();
+    expect(parseBillingConfig([])).toMatchObject({reasoningEffort: 'auto', reasoningTokenAllowance: 4096, imageQuality: 'auto'});
+    expect(parseBillingConfig([{key:'AI_Reasoning_Effort',value:'bad'}, {key:'AI_Reasoning_Token_Allowance',value:'999999'}, {key:'AI_Image_Quality',value:'bad'}])).toMatchObject({reasoningEffort:'auto',reasoningTokenAllowance:4096,imageQuality:'auto'});
   });
 
   it('never lets the request maximum fall below the minimum', () => {
@@ -91,6 +99,13 @@ describe('billing config', () => {
     expect(validateConfigValue('Billing_Notify_Email', 'owner@example.com')).toBeNull();
     expect(validateConfigValue('Billing_Notify_Email', 'nope')).not.toBeNull();
     expect(validateConfigValue('Review_Version', 'anything')).toBeNull();
+    expect(validateConfigValue('AI_Reasoning_Effort', 'xhigh')).toBeNull();
+    expect(validateConfigValue('AI_Reasoning_Effort', 'extreme')).not.toBeNull();
+    expect(validateConfigValue('AI_Reasoning_Token_Allowance', '32768')).toBeNull();
+    expect(validateConfigValue('AI_Reasoning_Token_Allowance', '32769')).not.toBeNull();
+    expect(validateConfigValue('AI_Reasoning_Token_Allowance', '0.5')).not.toBeNull();
+    expect(validateConfigValue('AI_Image_Quality', 'max')).toBeNull();
+    expect(validateConfigValue('AI_Image_Quality', 'ultra')).not.toBeNull();
   });
 });
 

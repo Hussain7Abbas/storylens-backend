@@ -98,7 +98,7 @@ describe('category highlight effects', () => {
 
 describe('word VFX', () => {
   type Word = { id: string; wordVfx: string; updatedAt: string };
-  for (const wordVfx of ['NONE', 'SPARKLES', 'HEAT', 'SHAKING', 'GLITCHING'] as const) {
+  for (const wordVfx of ['NONE', 'SPARKLES', 'HEAT', 'SHAKING', 'GLITCHING', 'GLARE'] as const) {
     live(`stores and replays independent keyword and alias ${wordVfx}`, async () => {
       const body = keywordBody({ wordVfx });
       const created = await call<Word>(reader, 'POST', '/keywords', body);
@@ -172,4 +172,98 @@ describe('word VFX colors', () => {
       expect((await call(reader, 'PUT', `/keyword-aliases/${alias.body.id}`, { baseUpdatedAt: alias.body.updatedAt, wordVfxColor })).status).toBe(422);
     });
   }
+});
+
+
+describe('main theme color overrides', () => {
+ type Word = { id: string; mainThemeColor: string | null; updatedAt: string };
+ live('round-trips independent keyword/alias overrides and preserves them for old clients and sync', async () => {
+  const created = await call<Word>(reader, 'POST', '/keywords', keywordBody({ mainThemeColor: '#A1b2C3' }));
+  expect(created.status).toBe(200); expect(created.body.mainThemeColor).toBe('#A1b2C3');
+  const alias = await call<Word>(reader, 'POST', '/keyword-aliases', { id: crypto.randomUUID(), keywordId: created.body.id, nameEn: 'Main color alias', mainThemeColor: '#abcdef' });
+  expect(alias.status).toBe(200); expect(alias.body.mainThemeColor).toBe('#abcdef');
+  const oldEdit = await call<Word>(reader, 'PUT', `/keywords/${created.body.id}`, { baseUpdatedAt: created.body.updatedAt, matchingType: 'PARTIAL' });
+  expect(oldEdit.status).toBe(200); expect(oldEdit.body.mainThemeColor).toBe('#A1b2C3');
+  const snapshot = await call<{ keywords: (Word & { aliases: Word[] })[] }>(reader, 'GET', `/sync/snapshot/novels/${novelId}`);
+  expect(snapshot.status).toBe(200);
+  expect(snapshot.body.keywords.find(row => row.id === created.body.id)).toMatchObject({ mainThemeColor: '#A1b2C3', aliases: [expect.objectContaining({ mainThemeColor: '#abcdef' })] });
+  const cleared = await call<Word>(reader, 'PUT', `/keyword-aliases/${alias.body.id}`, { baseUpdatedAt: alias.body.updatedAt, mainThemeColor: null });
+  expect(cleared.status).toBe(200); expect(cleared.body.mainThemeColor).toBeNull();
+  const reset = await call<Word>(reader, 'PUT', `/keywords/${created.body.id}`, { baseUpdatedAt: oldEdit.body.updatedAt, mainThemeColor: null });
+  expect(reset.status).toBe(200); expect(reset.body.mainThemeColor).toBeNull();
+ });
+ live('dashboard writes share the color field and reject invalid colors', async () => {
+  const { createSessionToken } = await import('@/lib/auth/session');
+  const role = await prisma.role.findUniqueOrThrow({ where: { slug: 'super-admin' } });
+  await prisma.user.update({ where: { id: reader.id }, data: { isAdmin: true, adminRoleId: role.id } });
+  const token = await createSessionToken(prisma, reader.id, 'admin');
+  const adminCall = async (path: string, body: unknown, method = 'PUT') => {
+   const response = await (await import('@/server')).app.handle(new Request(`http://localhost/api/admin${path}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+   return { status: response.status, body: await response.json() as Word };
+  };
+  const created = await call<Word>(reader, 'POST', '/keywords', keywordBody());
+  expect(created.body.mainThemeColor).toBeNull();
+  expect((await adminCall(`/keywords/${created.body.id}`, { mainThemeColor: '#654321' })).body.mainThemeColor).toBe('#654321');
+  const alias = await adminCall('/keyword-aliases/', { keywordId: created.body.id, nameEn: 'Dashboard color alias', mainThemeColor: '#abcdef' }, 'POST');
+  expect(alias.status).toBe(200); expect(alias.body.mainThemeColor).toBe('#abcdef');
+  for (const mainThemeColor of ['red', '#123', '#123456\n', 'url(https://example.org)']) {
+   expect((await adminCall(`/keywords/${created.body.id}`, { mainThemeColor })).status).toBe(422);
+   expect((await adminCall(`/keyword-aliases/${alias.body.id}`, { mainThemeColor })).status).toBe(422);
+   expect((await call(reader, 'POST', '/keywords', keywordBody({ mainThemeColor }))).status).toBe(422);
+  }
+  expect((await adminCall(`/keyword-aliases/${alias.body.id}`, { mainThemeColor: null })).body.mainThemeColor).toBeNull();
+ });
+});
+
+describe('category Word VFX defaults', () => {
+ type Category = { id: string; wordVfx: string; wordVfxColor: string | null; updatedAt: string };
+ live('persists effects and tint, replays creates, preserves old edits and enforces stale writes', async () => {
+  const id = crypto.randomUUID(); ids.categories.push(id);
+  const body = { id, nameEn: `Category VFX ${marker}`, color: '#123456', wordVfx: 'SPARKLES', wordVfxColor: '#aabbcc' };
+  const created = await call<Category>(moderator, 'POST', '/keyword-categories', body);
+  expect(created.status).toBe(200);
+  expect(created.body).toMatchObject({ wordVfx: 'SPARKLES', wordVfxColor: '#aabbcc' });
+  expect((await call(moderator, 'POST', '/keyword-categories', body)).body).toEqual(created.body);
+  expect((await call(moderator, 'POST', '/keyword-categories', { ...body, wordVfxColor: '#112233' })).status).toBe(409);
+  const edited = await call<Category>(moderator, 'PUT', `/keyword-categories/${id}`, { baseUpdatedAt: created.body.updatedAt, color: '#654321' });
+  expect(edited.body).toMatchObject({ wordVfx: 'SPARKLES', wordVfxColor: '#aabbcc' });
+  expect((await call(moderator, 'PUT', `/keyword-categories/${id}`, { baseUpdatedAt: created.body.updatedAt, wordVfx: 'HEAT' })).status).toBe(409);
+  const cleared = await call<Category>(moderator, 'PUT', `/keyword-categories/${id}`, { baseUpdatedAt: edited.body.updatedAt, wordVfx: 'NONE', wordVfxColor: null });
+  expect(cleared.body).toMatchObject({ wordVfx: 'NONE', wordVfxColor: null });
+  const plainId = crypto.randomUUID(); ids.categories.push(plainId);
+  expect((await call<Category>(moderator, 'POST', '/keyword-categories', { id: plainId, nameEn: `Default VFX ${marker}`, color: '#123456' })).body).toMatchObject({ wordVfx: 'NONE', wordVfxColor: null });
+  expect((await call(reader, 'PUT', `/keyword-categories/${id}`, { baseUpdatedAt: cleared.body.updatedAt, wordVfx: 'HEAT' })).status).toBe(403);
+  for (const extra of [{ wordVfx: 'UNKNOWN' }, { wordVfxColor: '#abc' }, { wordVfxColor: 'red' }, { wordVfxColor: '' }])
+   expect((await call(moderator, 'PUT', `/keyword-categories/${id}`, { baseUpdatedAt: cleared.body.updatedAt, ...extra })).status).toBe(422);
+ });
+ live('lets dashboard admins edit VFX with concurrency protection and exposes values to reader sync', async () => {
+  const { createSessionToken } = await import('@/lib/auth/session');
+  const role = await prisma.role.findUniqueOrThrow({ where: { slug: 'super-admin' } });
+  await prisma.user.update({ where: { id: reader.id }, data: { isAdmin: true, adminRoleId: role.id } });
+  const token = await createSessionToken(prisma, reader.id, 'admin');
+  const { app } = await import('@/server');
+  const adminCall = async (body: unknown, bearer = token) => {
+   const response = await app.handle(new Request(`http://localhost/api/admin/keyword-categories/${categoryId}`, { method: 'PUT', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+   return { status: response.status, body: await response.json() };
+  };
+  const before = await prisma.keywordCategory.findUniqueOrThrow({ where: { id: categoryId } });
+  const body = { baseUpdatedAt: before.updatedAt.toISOString(), wordVfx: 'GLARE', wordVfxColor: null };
+  expect((await adminCall(body, moderator.token)).status).toBe(403);
+  const edited = await adminCall(body);
+  expect(edited.status).toBe(200); expect(edited.body).toMatchObject({ wordVfx: 'GLARE', wordVfxColor: null });
+  expect((await adminCall(body)).status).toBe(409);
+  expect((await adminCall({ baseUpdatedAt: edited.body.updatedAt, wordVfxColor: '#abc' })).status).toBe(422);
+  const sync = await call<{ categories: Category[] }>(reader, 'GET', '/sync/snapshot/lookups');
+  expect(sync.status).toBe(200);
+  expect(sync.body.categories.find(row => row.id === categoryId)).toMatchObject({ wordVfx: 'GLARE', wordVfxColor: null });
+ });
+});
+
+
+live('stores and replays Glare on shared categories through the reader API', async () => {
+ const id = crypto.randomUUID(); ids.categories.push(id);
+ const body = { id, nameEn: `Glare category ${marker}`, color: '#123456', wordVfx: 'GLARE' };
+ const created = await call<{ wordVfx: string }>(moderator, 'POST', '/keyword-categories', body);
+ expect(created.status).toBe(200); expect(created.body.wordVfx).toBe('GLARE');
+ expect((await call(moderator, 'POST', '/keyword-categories', body)).body).toEqual(created.body);
 });

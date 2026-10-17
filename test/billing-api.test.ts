@@ -85,6 +85,7 @@ async function balanceOf(userId: string) {
 
 beforeAll(async () => {
   if (process.env.STORYLENS_LIVE_DB_TEST !== '1') return;
+  await setConfig('AI_Lens_Balance', '1000000');
   await setConfig('Lens_Price_USD', '0.01');
   await setConfig('Lens_Request_Min', '100');
   await setConfig('Lens_Pending_Requests_Max', '3');
@@ -380,5 +381,85 @@ describe('pricing records and configs', () => {
 
   live('keeps every balance equal to its ledger', async () => {
     expect(await auditBalances(prisma, ids.users)).toEqual([]);
+  });
+});
+
+
+describe('available lens inventory', () => {
+  live('deducts a gift once, refuses overdraws and rejects stale manual edits', async () => {
+    const actor = await makeActor('reader', marker); ids.users.push(actor.id);
+    await setConfig('AI_Lens_Balance', '12');
+    try {
+      const base = await prisma.config.findUniqueOrThrow({ where: { key: 'AI_Lens_Balance' } });
+      const gift = { id: crypto.randomUUID(), lenses: 10 };
+      const [first, replay] = await Promise.all([
+        adminCall('POST', `/users/${actor.id}/lenses/gifts`, gift),
+        adminCall('POST', `/users/${actor.id}/lenses/gifts`, gift),
+      ]);
+      expect([first.status, replay.status]).toEqual([200, 200]);
+      expect(await balanceOf(actor.id)).toBe(10);
+      expect((await prisma.config.findUniqueOrThrow({ where: { key: 'AI_Lens_Balance' } })).value).toBe('2');
+      const denied = await adminCall('POST', `/users/${actor.id}/lenses/gifts`, { id: crypto.randomUUID(), lenses: 3 });
+      expect(denied).toMatchObject({ status: 409, body: { code: 'AI_LENS_BALANCE_TOO_LOW', balance: 2, required: 3 } });
+      expect(await balanceOf(actor.id)).toBe(10);
+      expect(await prisma.lensTransaction.count({ where: { userId: actor.id } })).toBe(1);
+      const stale = await adminCall('PUT', '/configs/', { key: 'AI_Lens_Balance', value: '100', baseUpdatedAt: base.updatedAt.toISOString() });
+      expect(stale).toMatchObject({ status: 409, body: { code: 'CONFIG_STALE' } });
+      const current = await prisma.config.findUniqueOrThrow({ where: { key: 'AI_Lens_Balance' } });
+      expect((await adminCall('PUT', '/configs/', { key: 'AI_Lens_Balance', value: '20', baseUpdatedAt: current.updatedAt.toISOString() })).status).toBe(200);
+      await withLensChange(prisma, { userId: actor.id, delta: -1, type: 'AI_CHARGE', idempotencyKey: `inventory-spend:${marker}` });
+      expect((await prisma.config.findUniqueOrThrow({ where: { key: 'AI_Lens_Balance' } })).value).toBe('20');
+    } finally { await setConfig('AI_Lens_Balance', '1000000'); }
+  });
+  live('serializes concurrent sales and gifts and rolls a refused approval back to pending', async () => {
+    const actors = await Promise.all([makeActor('reader', marker), makeActor('reader', marker)]);
+    ids.users.push(...actors.map(actor => actor.id));
+    const sale = await call<{ request: RequestRow }>(actors[0]!, 'POST', '/billing/requests', requestBody({ lenses: 100 }));
+    expect(sale.status).toBe(200);
+    await setConfig('AI_Lens_Balance', '100');
+    try {
+      const results = await Promise.all([
+        adminCall('POST', `/billing/requests/${sale.body.request.id}/approve`),
+        adminCall('POST', `/users/${actors[1]!.id}/lenses/gifts`, { id: crypto.randomUUID(), lenses: 100 }),
+      ]);
+      expect(results.map(result => result.status).sort()).toEqual([200, 409]);
+      expect(await balanceOf(actors[0]!.id) + await balanceOf(actors[1]!.id)).toBe(100);
+      expect((await prisma.config.findUniqueOrThrow({ where: { key: 'AI_Lens_Balance' } })).value).toBe('0');
+      if (results[0]!.status === 409) expect((await prisma.billingRequest.findUniqueOrThrow({ where: { id: sale.body.request.id } })).status).toBe('PENDING');
+    } finally { await setConfig('AI_Lens_Balance', '1000000'); }
+  });
+  live('missing stock fails closed and invalid inventory values cannot be saved', async () => {
+    await prisma.config.deleteMany({ where: { key: 'AI_Lens_Balance' } });
+    try {
+      expect((await adminCall('POST', `/users/${reader.id}/lenses/gifts`, { id: crypto.randomUUID(), lenses: 1 })).status).toBe(409);
+      for (const value of ['-1', '1.5', '1000000000', 'garbage', '']) {
+        expect((await adminCall('PUT', '/configs/', { key: 'AI_Lens_Balance', value })).status).toBe(400);
+      }
+      expect((await adminCall('PUT', '/configs/', { key: 'AI_Lens_Balance', value: '5', baseUpdatedAt: null })).status).toBe(200);
+      expect((await adminCall('PUT', '/configs/', { key: 'AI_Lens_Balance', value: '6', baseUpdatedAt: null })).status).toBe(409);
+    } finally { await setConfig('AI_Lens_Balance', '1000000'); }
+  });
+});
+
+describe('admin chapter inspection', () => {
+  live('paginates artwork without context and loads context only on the scoped detail endpoint', async () => {
+    const novel = await prisma.novel.create({ data: { nameEn: `Inventory chapter test ${marker}` } });
+    const image = await prisma.file.create({ data: { type: 'Image', url: `https://example.invalid/${marker}.png`, provider_image_id: `chapter-${marker}`, delete_url: 'private-delete-url' } });
+    const context = { schemaVersion: 1, summary: 'A private chapter summary.', scenes: [], stateChanges: [] };
+    try {
+      const chapter = await prisma.chapter.create({ data: { novelId: novel.id, number: 1, name: 'A beginning', imageId: image.id, context, contextLeaseToken: 'private-context-token', coverLeaseToken: 'private-cover-token' } });
+      await prisma.chapter.create({ data: { novelId: novel.id, number: 2 } });
+      const list = await adminCall<{ data: Json[]; total: number }>('GET', `/novels/${novel.id}/chapters?pageSize=1`);
+      expect(list.status).toBe(200); expect(list.body.total).toBe(2); expect(list.body.data).toHaveLength(1);
+      expect(list.body.data[0]).toMatchObject({ id: chapter.id, number: 1, image: { url: image.url } });
+      expect(list.body.data[0]).not.toHaveProperty('context');
+      expect(JSON.stringify(list.body)).not.toContain('private-context-token');
+      const detail = await adminCall('GET', `/novels/${novel.id}/chapters/${chapter.id}`);
+      expect(detail).toMatchObject({ status: 200, body: { context, image: { url: image.url } } });
+      expect(JSON.stringify(detail.body)).not.toContain('private-cover-token');
+      expect((await adminCall('GET', `/novels/${crypto.randomUUID()}/chapters/${chapter.id}`)).status).toBe(404);
+      const forbidden = await app.handle(new Request(`http://localhost/api/admin/novels/${novel.id}/chapters`, { headers: { Authorization: `Bearer ${reader.token}` } }));
+      expect(forbidden.status).toBe(403);
+    } finally { await prisma.novel.delete({ where: { id: novel.id } }); await prisma.file.delete({ where: { id: image.id } }); }
   });
 });

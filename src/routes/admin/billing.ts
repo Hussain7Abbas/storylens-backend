@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { getBillingConfig } from '@/lib/billing/config';
 import { requestApprovedEmail, requestRejectedEmail } from '@/lib/billing/emails';
+import { deductLensInventory } from '@/lib/billing/inventory';
 import { applyLensChange } from '@/lib/billing/ledger';
 import { formatMicros, MICROS_PER_USD } from '@/lib/billing/money';
 import { billingRequestSchema, billingRequestStatusSchema, serializeRequest } from '@/lib/billing/serialize';
@@ -197,6 +198,7 @@ export const adminBilling = new Elysia({ prefix: '/billing', tags: ['Admin: Bill
           billingRequestId: current.id,
           createdById: authedUser.id,
         });
+        if (!lens.replayed) await deductLensInventory(tx, current.lenses);
         return { request: await findRequest(tx, params.id), applied: lens };
       });
 

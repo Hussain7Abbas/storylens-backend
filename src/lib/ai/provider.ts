@@ -1,3 +1,4 @@
+import type { ReasoningEffort, ImageQuality } from './generation-settings';
 import type { AiStreamErrorCode } from './cloud/error-codes';
 
 /**
@@ -20,6 +21,8 @@ export type ChatInput = {
   system: string;
   prompt: string;
   maxTokens: number;
+  reasoningEffort?: ReasoningEffort;
+  reasoningTokenAllowance?: number;
   /** Lets the model search the web (novel context research). */
   webSearch?: { maxResults: number };
   /** The reader's opaque ID, for the provider's abuse tracking. */
@@ -41,6 +44,7 @@ export type ImageInput = {
   aspectRatio: '1:1' | '2:3' | '16:9';
   referenceImageUrls?: string[];
   format: 'jpeg';
+  quality?: ImageQuality;
   userId: string;
   signal: AbortSignal;
 };
