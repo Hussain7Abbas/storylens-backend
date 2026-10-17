@@ -1,5 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { Elysia, t } from 'elysia';
+import { chapterPublicSelect, PublicChapter } from '@/lib/chapter-context/public';
+import { parseStoredContext } from '@/lib/chapter-context/storage';
 import { FilePlain, NovelPlain } from '@/lib/db';
 import { authorize } from '@/middleware/authorize';
 import { adminListQuery, pageArgs } from '@/schemas/admin';
@@ -165,6 +167,40 @@ export const adminNovels = new Elysia({ prefix: '/novels', tags: ['Admin: Novels
       params: t.Object({ id: t.String() }),
       response: { 200: t.Object({ data: t.Array(adminKeywordDetailSchema) }) },
       detail: { summary: 'List a novel’s keywords with their versions and aliases' },
+    },
+  )
+
+  .get(
+    '/:id/chapters',
+    async ({ prisma, params, query }) => {
+      if (!await prisma.novel.findUnique({ where: { id: params.id }, select: { id: true } })) notFound();
+      const where = { novelId: params.id };
+      const [data, total] = await Promise.all([
+        prisma.chapter.findMany({ where, select: { ...chapterPublicSelect, image: true }, orderBy: { number: 'asc' }, ...pageArgs(query) }),
+        prisma.chapter.count({ where }),
+      ]);
+      return { data, total };
+    },
+    {
+      params: t.Object({ id: t.String() }), query: t.Object(adminListQuery),
+      response: { 200: t.Object({ data: t.Array(t.Composite([PublicChapter, t.Object({ image: t.Nullable(FilePlain) })])), total: t.Number() }) },
+      detail: { summary: 'List a novel’s chapters and artwork without context payloads' },
+    },
+  )
+  .get(
+    '/:id/chapters/:chapterId',
+    async ({ prisma, params }) => {
+      const chapter = await prisma.chapter.findFirst({
+        where: { id: params.chapterId, novelId: params.id },
+        select: { ...chapterPublicSelect, image: true, context: true },
+      });
+      if (!chapter) throw new HttpError({ statusCode: 404, message: 'Chapter not found' });
+      return { ...chapter, context: parseStoredContext(chapter.context) };
+    },
+    {
+      params: t.Object({ id: t.String(), chapterId: t.String() }),
+      response: { 200: t.Composite([PublicChapter, t.Object({ image: t.Nullable(FilePlain), context: t.Unknown() })]) },
+      detail: { summary: 'View a chapter’s artwork and structured context' },
     },
   )
 

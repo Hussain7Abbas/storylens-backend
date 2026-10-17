@@ -5,6 +5,7 @@ const gemini = {
   id: 'google/gemini-2.5-flash',
   name: 'Google: Gemini 2.5 Flash',
   context_length: 1_048_576,
+  reasoning: {mandatory: false, supported_efforts: ['none','low','high'], default_effort: 'low'},
   architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] },
   pricing: { prompt: '0.0000003', completion: '0.0000025', web_search: '0.014' },
 };
@@ -46,5 +47,13 @@ describe('model catalog', () => {
     const catalog = await getModelCatalog({ refresh: true, fetcher });
     expect(catalog.text.map((model) => model.id)).toEqual(['google/gemini-2.5-flash']);
     expect(catalog.image.map((model) => model.id)).toEqual(['bytedance-seed/seedream-5-0-flash']);
+    expect(catalog.text[0]).toMatchObject({reasoningSupported:true,reasoningEfforts:['none','low','high'],reasoningMandatory:false,defaultReasoningEffort:'low'});
   });
+});
+
+
+it('loads image quality controls from the dedicated Images API catalog', async () => {
+ const fetcher = (async (url: string) => Response.json({data: String(url).endsWith('/images/models') ? [{id:seedream.id,supported_parameters:{quality:{values:['auto','low','high']}}}] : String(url).includes('output_modalities=image') ? [seedream] : [gemini]})) as unknown as typeof fetch;
+ const catalog = await getModelCatalog({refresh:true,fetcher});
+ expect(catalog.image[0]?.imageQualities).toEqual(['auto','low','high']);
 });

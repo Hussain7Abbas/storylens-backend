@@ -4,8 +4,8 @@ import { openRouterProvider } from '@/lib/ai/openrouter-provider';
 import { AiProviderError } from '@/lib/ai/provider';
 import { prisma } from '@/lib/db';
 
-// One tiny Gemini call and one Seedream image with the configured OpenRouter key
-// (about $0.02). Prints the data policy used, tokens and cost; writes nothing.
+// One text call and one image with the dashboard models, reasoning and quality.
+// Cost depends on those settings. Prints data policy, tokens and cost; writes nothing.
 async function run(label: string, task: () => Promise<{ dataPolicy: string; usage: unknown; providerId?: string }>) {
   const started = performance.now();
   try {
@@ -22,7 +22,7 @@ async function run(label: string, task: () => Promise<{ dataPolicy: string; usag
 try {
   if (!env.OPENROUTER_API_KEY) throw new Error('Set OPENROUTER_API_KEY first');
   // The models chosen in the dashboard (Settings → AI).
-  const { textModel, imageModel } = await getBillingConfig(prisma);
+  const { textModel, imageModel, reasoningEffort, reasoningTokenAllowance, imageQuality } = await getBillingConfig(prisma);
   const signal = new AbortController().signal;
   await run(`chat ${textModel}`, () =>
     openRouterProvider.chat({
@@ -30,6 +30,8 @@ try {
       system: 'Answer in one short sentence.',
       prompt: 'Say hello to a reader of web novels.',
       maxTokens: 60,
+      reasoningEffort,
+      reasoningTokenAllowance,
       userId: 'smoke-test',
       signal,
     }),
@@ -40,6 +42,7 @@ try {
       prompt: 'A small paper lantern glowing on a wooden desk, soft light, simple background.',
       aspectRatio: '1:1',
       format: 'jpeg',
+      quality: imageQuality,
       userId: 'smoke-test',
       signal,
     }),

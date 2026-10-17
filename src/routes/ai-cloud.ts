@@ -1,3 +1,4 @@
+import type { ReasoningEffort, ImageQuality } from '@/lib/ai/generation-settings';
 import type { AiFeaturePrice, PrismaClient } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { env } from '@/env';
@@ -110,7 +111,7 @@ function logAttempt(feature: string, status: string, durationMs: number, usage: 
 /** Runs a text action and settles it. Never throws: failures are refunded and returned. */
 async function runText(
   prisma: PrismaClient,
-  input: { user: AuthUserPayload; price: AiFeaturePrice; model: string; actionId: string; attempt: number; prompt: string; language: 'en' | 'ar'; signal: AbortSignal },
+  input: { user: AuthUserPayload; price: AiFeaturePrice; model: string; reasoningEffort: ReasoningEffort; reasoningTokenAllowance: number; actionId: string; attempt: number; prompt: string; language: 'en' | 'ar'; signal: AbortSignal },
   balance: number,
   lensesCharged: number,
 ): Promise<Outcome> {
@@ -122,6 +123,8 @@ async function runText(
       system: systemRules(price.key, input.language),
       prompt: input.prompt,
       maxTokens: price.maxOutputTokens,
+      reasoningEffort: input.reasoningEffort,
+      reasoningTokenAllowance: input.reasoningTokenAllowance,
       ...(price.key === 'novel_context' ? { webSearch: { maxResults: RESEARCH_RESULTS } } : {}),
       userId: input.user.id,
       signal: input.signal,
@@ -152,7 +155,7 @@ async function runText(
 /** A short brief on the text model, then the image. Never throws. */
 async function runImage(
   prisma: PrismaClient,
-  input: { user: AuthUserPayload; price: AiFeaturePrice; textModel: string; imageModel: string; actionId: string; prompt: string; referenceImageUrls?: string[]; signal: AbortSignal },
+  input: { user: AuthUserPayload; price: AiFeaturePrice; textModel: string; imageModel: string; reasoningEffort: ReasoningEffort; reasoningTokenAllowance: number; imageQuality: ImageQuality; actionId: string; prompt: string; referenceImageUrls?: string[]; signal: AbortSignal },
   balance: number,
   lensesCharged: number,
 ): Promise<Outcome> {
@@ -169,6 +172,8 @@ async function runImage(
       system: price.key === 'chapter_cover' ? CHAPTER_COVER_BRIEF_RULES : IMAGE_BRIEF_RULES,
       prompt: input.prompt,
       maxTokens: price.maxOutputTokens,
+      reasoningEffort: input.reasoningEffort,
+      reasoningTokenAllowance: input.reasoningTokenAllowance,
       userId: input.user.id,
       signal: input.signal,
     });
@@ -184,6 +189,7 @@ async function runImage(
       aspectRatio: price.key === 'chapter_cover' ? '16:9' : '1:1',
       referenceImageUrls: input.referenceImageUrls,
       format: 'jpeg',
+      quality: input.imageQuality,
       userId: input.user.id,
       signal: input.signal,
     });
@@ -280,6 +286,8 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
               user: authedUser,
               price,
               model: config.textModel,
+              reasoningEffort: config.reasoningEffort,
+              reasoningTokenAllowance: config.reasoningTokenAllowance,
               actionId: body.actionId,
               attempt: body.attempt,
               prompt: body.prompt,
@@ -320,7 +328,7 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
         () =>
           runImage(
             prisma,
-            { user: authedUser, price, textModel: config.textModel, imageModel: config.imageModel, actionId: body.actionId, prompt: body.prompt, referenceImageUrls: body.referenceImageUrls, signal: request.signal },
+            { user: authedUser, price, textModel: config.textModel, imageModel: config.imageModel, reasoningEffort: config.reasoningEffort, reasoningTokenAllowance: config.reasoningTokenAllowance, imageQuality: config.imageQuality, actionId: body.actionId, prompt: body.prompt, referenceImageUrls: body.referenceImageUrls, signal: request.signal },
             started.balance,
             started.lensesCharged,
           ),

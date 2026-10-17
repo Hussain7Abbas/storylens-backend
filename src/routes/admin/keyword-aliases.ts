@@ -1,3 +1,4 @@
+import { mainThemeColorSchema } from '@/schemas/main-theme-color';
 import type { PrismaClient } from '@prisma/client';
 import { Elysia, t } from 'elysia';
 import { MatchingType } from '@/lib/db';
@@ -58,6 +59,7 @@ const aliasFields = {
   fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
   wordVfx: t.Optional(wordVfxSchema),
   wordVfxColor: t.Optional(wordVfxColorSchema),
+  mainThemeColor: t.Optional(mainThemeColorSchema),
   overrideStyle: t.Optional(t.Boolean()),
 };
 
@@ -91,6 +93,7 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
             fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters ?? true,
             wordVfx: body.wordVfx ?? 'NONE',
             wordVfxColor: body.wordVfxColor ?? null,
+            mainThemeColor: body.mainThemeColor ?? null,
             overrideStyle: body.overrideStyle ?? false,
             keywordId: keyword.id,
             createdById: authedUser.id,
@@ -146,6 +149,7 @@ export const adminKeywordAliases = new Elysia({ prefix: '/keyword-aliases', tags
             fuzzyMatchArabicCharacters: body.fuzzyMatchArabicCharacters,
             wordVfx: body.wordVfx,
             wordVfxColor: body.wordVfxColor,
+            mainThemeColor: body.mainThemeColor,
             overrideStyle: body.overrideStyle,
           },
           include: styleInclude,

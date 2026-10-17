@@ -1,3 +1,6 @@
+import { wordVfxSchema, wordVfxColorSchema } from '@/schemas/word-vfx';
+import { assertNotStale, compareAndSwap } from '@/lib/sync/precondition';
+import { staleWriteSchema } from '@/schemas/common';
 import { descriptionData } from '@/lib/keywords/descriptions';
 import type { Prisma } from '@prisma/client';
 import { Elysia, t } from 'elysia';
@@ -53,6 +56,26 @@ export const adminKeywordCategories = new Elysia({ prefix: '/keyword-categories'
   .get('/', async ({ prisma }) => ({ data: await prisma.keywordCategory.findMany({ orderBy: orderByName }) }), {
     response: { 200: t.Object({ data: t.Array(KeywordCategoryPlain) }) },
     detail: { summary: 'List keyword categories' },
+  })
+  .put('/:id', async ({ prisma, params: { id }, body, t }) => {
+    const existing = await prisma.keywordCategory.findUnique({ where: { id } });
+    if (!existing) throw new HttpError({ statusCode: 404, message: 'Category not found' });
+    const current = () => prisma.keywordCategory.findUniqueOrThrow({ where: { id } });
+    await assertNotStale(existing, body.baseUpdatedAt, current, t);
+    return compareAndSwap(() => prisma.keywordCategory.update({
+      where: { id, updatedAt: existing.updatedAt },
+      data: { wordVfx: body.wordVfx, wordVfxColor: body.wordVfxColor, switchPositionWithNature: body.switchPositionWithNature },
+    }), current, t);
+  }, {
+    params: t.Object({ id: t.String({ format: 'uuid' }) }),
+    body: t.Object({
+      baseUpdatedAt: t.String({ format: 'date-time' }),
+      wordVfx: t.Optional(wordVfxSchema),
+      wordVfxColor: t.Optional(wordVfxColorSchema),
+      switchPositionWithNature: t.Optional(t.Boolean()),
+    }),
+    response: { 200: KeywordCategoryPlain, 409: staleWriteSchema(KeywordCategoryPlain) },
+    detail: { summary: 'Update category Word VFX' },
   });
 
 export const adminKeywordNatures = new Elysia({ prefix: '/keyword-natures', tags: ['Admin: Keywords'] })

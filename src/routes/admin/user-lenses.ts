@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { Elysia, t } from 'elysia';
+import { deductLensInventory } from '@/lib/billing/inventory';
 import { type LensChange, withLensChange } from '@/lib/billing/ledger';
 import { lensTransactionTypeSchema } from '@/lib/billing/serialize';
 import { authorize } from '@/middleware/authorize';
@@ -49,7 +50,9 @@ async function assertReader(prisma: Prisma.TransactionClient, id: string): Promi
 
 /** A resent dialog (same client ID) returns its change; another user or amount is a conflict. */
 async function apply(prisma: Parameters<typeof withLensChange>[0], change: LensChange) {
-  const applied = await withLensChange(prisma, change);
+  const applied = await withLensChange(prisma, change, change.type === 'ADMIN_GIFT'
+    ? async (tx) => { await deductLensInventory(tx, change.delta); }
+    : undefined);
   if (applied.replayed && (applied.transaction.userId !== change.userId || applied.transaction.delta !== change.delta)) {
     throw new HttpError({ statusCode: 409, code: 'ID_CONFLICT', message: 'This ID is already used' });
   }

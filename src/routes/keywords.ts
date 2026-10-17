@@ -1,3 +1,4 @@
+import { mainThemeColorSchema } from '@/schemas/main-theme-color';
 import { chapterPublicSelect } from '@/lib/chapter-context/public';
 import { descriptionData } from '@/lib/keywords/descriptions';
 import { Elysia, t, type Static } from "elysia";
@@ -302,6 +303,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters ?? true,
 								wordVfx: sanitizedBody.wordVfx ?? "NONE",
 								wordVfxColor: sanitizedBody.wordVfxColor ?? null,
+								mainThemeColor: sanitizedBody.mainThemeColor ?? null,
 								novelId,
 								createdById: authedUser.id,
 							},
@@ -361,6 +363,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 				wordVfx: t.Optional(wordVfxSchema),
 				wordVfxColor: t.Optional(wordVfxColorSchema),
+				mainThemeColor: t.Optional(mainThemeColorSchema),
 				novelId: t.String({ format: "uuid" }),
 				categoryId: t.String({ format: "uuid" }),
 				natureId: t.String({ format: "uuid" }),
@@ -442,6 +445,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
 								wordVfx: sanitizedBody.wordVfx,
 								wordVfxColor: sanitizedBody.wordVfxColor,
+								mainThemeColor: sanitizedBody.mainThemeColor,
 							},
 							include: keywordInclude,
 						});
@@ -463,6 +467,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 				wordVfx: t.Optional(wordVfxSchema),
 				wordVfxColor: t.Optional(wordVfxColorSchema),
+				mainThemeColor: t.Optional(mainThemeColorSchema),
 				// Translation link: the keyword that holds this one's other-language name.
 				// It is merged into this keyword and deleted (see `mergeTranslationKeyword`).
 				translationKeywordId: t.Optional(t.String({ format: "uuid" })),

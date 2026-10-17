@@ -1,3 +1,4 @@
+import { REASONING_EFFORTS, IMAGE_QUALITIES, type ReasoningEffort, type ImageQuality } from '@/lib/ai/generation-settings';
 import type { PrismaClient } from '@prisma/client';
 import { MAX_PRICE_MICROS, parseUsdToMicros } from './money';
 
@@ -7,6 +8,7 @@ import { MAX_PRICE_MICROS, parseUsdToMicros } from './money';
  */
 export const BILLING_CONFIG_KEYS = {
   Lens_Price_USD: 'Price of one lens in US dollars, up to 6 decimals (for example 0.01). Missing or invalid: buying lenses is unavailable.',
+  AI_Lens_Balance: 'Available whole lenses to sell or gift (0–999999999). Deducted on approved sales and dashboard gifts; missing means zero.',
   Lens_Trial_Gift: 'Lenses given once to each new registered reader. 0 gives nothing and shows no celebration.',
   Lens_Request_Min: 'Smallest lens request (whole lenses).',
   Lens_Request_Max: 'Largest lens request (whole lenses, at most 50000).',
@@ -14,7 +16,10 @@ export const BILLING_CONFIG_KEYS = {
   Billing_Notify_Email: 'Email that receives each new lens request with the reader’s contact. Empty: DASHBOARD_ADMIN_EMAIL.',
   AI_Cloud_Enabled: 'true turns Story Lens Cloud AI on; false answers every cloud AI request as unavailable.',
   AI_Text_Model: 'OpenRouter model for every text feature and the image brief (default google/gemini-2.5-flash). Pick it in Settings → AI.',
-  AI_Image_Model: 'OpenRouter model that draws character images (default bytedance-seed/seedream-5-0-flash). Pick it in Settings → AI.',
+  AI_Image_Model: 'OpenRouter model that draws character images and chapter covers (default bytedance-seed/seedream-5-0-flash). Pick it in Settings → AI.',
+  AI_Reasoning_Effort: 'Text reasoning effort: auto, none, minimal, low, medium, high, xhigh or max. Auto uses the model default.',
+  AI_Reasoning_Token_Allowance: 'Extra completion tokens reserved for thinking, on top of each feature output limit (0–32768; default 4096). Reasoning is billed as output.',
+  AI_Image_Quality: 'Image quality: auto, low, medium, high, xhigh or max. Unsupported levels use the selected model default.',
   AI_Daily_Spend_Cap_USD: 'Optional daily OpenRouter spending cap in US dollars (UTC days). Empty: no cap.',
   AI_Reader_Max_Running: 'Cloud AI actions one reader may run at the same time (1–10).',
   AI_Reader_Max_Per_10_Min: 'Cloud AI actions one reader may start in 10 minutes (1–500).',
@@ -40,6 +45,9 @@ export type BillingConfig = {
   cloudAiEnabled: boolean;
   textModel: string;
   imageModel: string;
+  reasoningEffort: ReasoningEffort;
+  reasoningTokenAllowance: number;
+  imageQuality: ImageQuality;
   dailySpendCapMicros: number | null;
   readerMaxRunning: number;
   readerMaxPer10Min: number;
@@ -77,6 +85,8 @@ export function validateConfigValue(key: string, value: string): string | null {
       const parsed = usd(trimmed, { positive: false });
       return parsed.ok ? null : `${key} must be empty or ${parsed.message}.`;
     }
+    case 'AI_Lens_Balance':
+      return check(key, integer(trimmed, 0, 999_999_999));
     case 'Lens_Trial_Gift':
       return check(key, integer(trimmed, 0, 10_000));
     case 'Lens_Request_Min':
@@ -91,6 +101,12 @@ export function validateConfigValue(key: string, value: string): string | null {
       return check(key, integer(trimmed, 1, 500));
     case 'AI_Cloud_Enabled':
       return trimmed === 'true' || trimmed === 'false' ? null : `${key} must be true or false.`;
+    case 'AI_Reasoning_Effort':
+      return REASONING_EFFORTS.includes(trimmed as ReasoningEffort) ? null : `${key} must be one of ${REASONING_EFFORTS.join(', ')}.`;
+    case 'AI_Image_Quality':
+      return IMAGE_QUALITIES.includes(trimmed as ImageQuality) ? null : `${key} must be one of ${IMAGE_QUALITIES.join(', ')}.`;
+    case 'AI_Reasoning_Token_Allowance':
+      return check(key, integer(trimmed, 0, 32768));
     case 'AI_Text_Model':
     case 'AI_Image_Model':
       return MODEL_ID.test(trimmed) && trimmed.length <= 120 ? null : `${key} must be an OpenRouter model ID such as provider/model-name.`;
@@ -148,6 +164,9 @@ export function parseBillingConfig(rows: Array<{ key: string; value: string }>):
     cloudAiEnabled: values.get('AI_Cloud_Enabled') === 'true',
     textModel: read('AI_Text_Model', model, DEFAULT_TEXT_MODEL),
     imageModel: read('AI_Image_Model', model, DEFAULT_IMAGE_MODEL),
+    reasoningEffort: read('AI_Reasoning_Effort', text => REASONING_EFFORTS.includes(text as ReasoningEffort) ? {ok: true, value: text as ReasoningEffort} : {ok: false, message: 'a reasoning effort'}, 'auto'),
+    reasoningTokenAllowance: read('AI_Reasoning_Token_Allowance', text => integer(text, 0, 32768), 4096),
+    imageQuality: read('AI_Image_Quality', text => IMAGE_QUALITIES.includes(text as ImageQuality) ? {ok: true, value: text as ImageQuality} : {ok: false, message: 'an image quality'}, 'auto'),
     dailySpendCapMicros: read<number | null>('AI_Daily_Spend_Cap_USD', (text) => usd(text, { positive: false }), null),
     readerMaxRunning: read('AI_Reader_Max_Running', (text) => integer(text, 1, 10), 3),
     readerMaxPer10Min: read('AI_Reader_Max_Per_10_Min', (text) => integer(text, 1, 500), 30),

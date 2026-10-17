@@ -1,3 +1,4 @@
+import { LENS_INVENTORY_KEY, lockLensInventory } from '@/lib/billing/inventory';
 import { ConfigPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import { authorize } from '@/middleware/authorize';
@@ -80,15 +81,19 @@ export const adminConfigs = new Elysia({
       if (invalid) {
         throw new HttpError({ code: 'INVALID_CONFIG_VALUE', message: invalid, details: { key: body.key } });
       }
-      const config = await prisma.config.upsert({
-        where: { key: body.key },
-        update: {
-          value: body.value,
-        },
-        create: {
-          key: body.key,
-          value: body.value,
-        },
+      const config = await prisma.$transaction(async (tx) => {
+        let updatedAt: Date | undefined;
+        if (body.key === LENS_INVENTORY_KEY) {
+          await lockLensInventory(tx);
+          const current = await tx.config.findUnique({ where: { key: body.key } });
+          updatedAt = new Date(Math.max(Date.now(), (current?.updatedAt.getTime() ?? 0) + 1));
+          if (body.baseUpdatedAt !== undefined && body.baseUpdatedAt !== (current?.updatedAt.toISOString() ?? null)) {
+            throw new HttpError({ statusCode: 409, code: 'CONFIG_STALE', message: 'The available balance changed. Reload it before saving.' });
+          }
+        }
+        return tx.config.upsert({
+          where: { key: body.key }, update: { value: body.value, updatedAt }, create: { key: body.key, value: body.value },
+        });
       });
 
       return config;
@@ -97,6 +102,7 @@ export const adminConfigs = new Elysia({
       body: t.Object({
         key: t.String(),
         value: t.String(),
+        baseUpdatedAt: t.Optional(t.Nullable(t.String({ format: 'date-time' }))),
       }),
       response: {
         200: ConfigPlain,
@@ -111,16 +117,12 @@ export const adminConfigs = new Elysia({
   .delete(
     '/:key',
     async ({ prisma, params: { key } }) => {
-      const existingConfig = await prisma.config.findUnique({
-        where: { key },
-      });
-
-      if (!existingConfig) {
-        throw new HttpError({ message: 'Config not found', statusCode: 404 });
-      }
-
-      await prisma.config.delete({
-        where: { key },
+      const existingConfig = await prisma.$transaction(async (tx) => {
+        if (key === LENS_INVENTORY_KEY) await lockLensInventory(tx);
+        const current = await tx.config.findUnique({ where: { key } });
+        if (!current) throw new HttpError({ message: 'Config not found', statusCode: 404 });
+        await tx.config.delete({ where: { key } });
+        return current;
       });
 
       return existingConfig;

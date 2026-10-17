@@ -1,3 +1,4 @@
+import { mainThemeColorSchema } from '@/schemas/main-theme-color';
 import { descriptionData } from '@/lib/keywords/descriptions';
 import type { PrismaClient } from "@prisma/client";
 import { Elysia, t } from "elysia";
@@ -148,6 +149,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters ?? true,
 								wordVfx: sanitizedBody.wordVfx ?? "NONE",
 								wordVfxColor: sanitizedBody.wordVfxColor ?? null,
+								mainThemeColor: sanitizedBody.mainThemeColor ?? null,
 								categoryId: sanitizedBody.categoryId ?? null,
 								natureId: sanitizedBody.natureId ?? null,
 								imageId: sanitizedBody.imageId ?? null,
@@ -175,6 +177,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 				wordVfx: t.Optional(wordVfxSchema),
 				wordVfxColor: t.Optional(wordVfxColorSchema),
+				mainThemeColor: t.Optional(mainThemeColorSchema),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
@@ -249,6 +252,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 								fuzzyMatchArabicCharacters: sanitizedBody.fuzzyMatchArabicCharacters,
 								wordVfx: sanitizedBody.wordVfx,
 								wordVfxColor: sanitizedBody.wordVfxColor,
+								mainThemeColor: sanitizedBody.mainThemeColor,
 								categoryId: sanitizedBody.categoryId,
 								natureId: sanitizedBody.natureId,
 								imageId: sanitizedBody.imageId,
@@ -273,6 +277,7 @@ export const keywordAliases = new Elysia({ prefix: "/keyword-aliases", tags: ["K
 				fuzzyMatchArabicCharacters: t.Optional(t.Boolean()),
 				wordVfx: t.Optional(wordVfxSchema),
 				wordVfxColor: t.Optional(wordVfxColorSchema),
+				mainThemeColor: t.Optional(mainThemeColorSchema),
 				categoryId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				natureId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),

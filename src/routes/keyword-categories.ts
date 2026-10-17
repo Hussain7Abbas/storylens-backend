@@ -1,3 +1,5 @@
+import { deleteLookup } from '@/lib/sync/delete-lookup';
+import { wordVfxSchema, wordVfxColorSchema } from '@/schemas/word-vfx';
 import { KeywordCategoryPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
 import type { PrismaClient } from '@prisma/client';
@@ -70,6 +72,7 @@ export const keywordCategories = new Elysia({
           _count: {
             select: {
               keywordVersions: true,
+              keywordAliases: true,
             },
           },
         },
@@ -98,6 +101,7 @@ export const keywordCategories = new Elysia({
           t.Object({
             _count: t.Object({
               keywordVersions: t.Number(),
+              keywordAliases: t.Number(),
             }),
           }),
         ]),
@@ -111,7 +115,12 @@ export const keywordCategories = new Elysia({
     '/',
     async ({ t, prisma, body }) => {
       const findCategory = () => prisma.keywordCategory.findUnique({ where: { id: body.id } });
-      const isReplay = (row: CategoryRow) => isLookupReplay(row, body) && (body.effect === undefined || row.effect === body.effect);
+      const isReplay = (row: CategoryRow) =>
+        isLookupReplay(row, body) &&
+        (body.effect === undefined || row.effect === body.effect) &&
+        (body.wordVfx === undefined || row.wordVfx === body.wordVfx) &&
+        (body.wordVfxColor === undefined || row.wordVfxColor === body.wordVfxColor) &&
+        (body.switchPositionWithNature === undefined || row.switchPositionWithNature === body.switchPositionWithNature);
 
       const replay = await findReplay(findCategory, isReplay, t);
       if (replay) return replay;
@@ -128,6 +137,9 @@ export const keywordCategories = new Elysia({
               ...names,
               color: body.color,
               effect: body.effect,
+              wordVfx: body.wordVfx,
+              wordVfxColor: body.wordVfxColor,
+              switchPositionWithNature: body.switchPositionWithNature,
               description: body.description,
             },
           }),
@@ -143,6 +155,9 @@ export const keywordCategories = new Elysia({
         nameAr: t.Optional(t.Nullable(t.String())),
         color: t.String({ pattern: '^#[0-9A-Fa-f]{6}$' }),
         effect: t.Optional(categoryEffectSchema),
+        wordVfx: t.Optional(wordVfxSchema),
+        wordVfxColor: t.Optional(wordVfxColorSchema),
+        switchPositionWithNature: t.Optional(t.Boolean()),
         description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: {
@@ -184,6 +199,9 @@ export const keywordCategories = new Elysia({
           ...names,
           color: body.color,
           effect: body.effect,
+          wordVfx: body.wordVfx,
+          wordVfxColor: body.wordVfxColor,
+          switchPositionWithNature: body.switchPositionWithNature,
           description: body.description,
         },
       }), () => prisma.keywordCategory.findUniqueOrThrow({ where: { id } }), t);
@@ -198,6 +216,9 @@ export const keywordCategories = new Elysia({
         nameAr: t.Optional(t.Nullable(t.String())),
         color: t.Optional(t.String({ pattern: '^#[0-9A-Fa-f]{6}$' })),
         effect: t.Optional(categoryEffectSchema),
+        wordVfx: t.Optional(wordVfxSchema),
+        wordVfxColor: t.Optional(wordVfxColorSchema),
+        switchPositionWithNature: t.Optional(t.Boolean()),
         description: t.Optional(t.Nullable(t.String({ maxLength: 1000 }))),
       }),
       response: {
@@ -207,51 +228,17 @@ export const keywordCategories = new Elysia({
     },
   )
 
-  // Delete keyword category (moderator by default); refused while a version or alias uses it
-  .delete(
-    '/:id',
-    async ({ t, prisma, params: { id } }) => {
-      const existing = await prisma.keywordCategory.findUnique({
-        where: { id },
-        include: {
-          _count: {
-            select: {
-              keywordVersions: true,
-              keywordAliases: true,
-            },
-          },
-        },
-      });
-
-      if (!existing) throw notFound(t);
-
-      if (existing._count.keywordVersions > 0 || existing._count.keywordAliases > 0) {
-        throw new HttpError({
-          statusCode: 400,
-          code: 'CATEGORY_IN_USE',
-          message: t({
-            en: 'Cannot delete category with keywords',
-            ar: 'لا يمكن حذف فئة تحتوي على كلمات مفتاحية',
-          }),
-        });
-      }
-
-      await prisma.keywordCategory.delete({
-        where: { id },
-      });
-
-      const { _count: _usage, ...category } = existing;
-      return category;
-    },
-    {
-      params: t.Object({
-        id: t.String({ format: 'uuid' }),
-      }),
-      response: {
-        200: KeywordCategoryPlain,
-      },
-    },
-  );
+  // Delete, optionally moving every linked version/alias in the same transaction.
+  .delete('/:id', async ({ t, prisma, params: { id }, query: { replacementId } }) => {
+    const existing = await prisma.keywordCategory.findUnique({ where: { id } });
+    if (!existing) throw notFound(t);
+    await deleteLookup(prisma, 'keywordCategory', id, replacementId, t);
+    return existing;
+  }, {
+    params: t.Object({ id: t.String({ format: 'uuid' }) }),
+    query: t.Object({ replacementId: t.Optional(t.String({ format: 'uuid' })) }),
+    response: { 200: KeywordCategoryPlain },
+  });
 
 type CategoryRow = Awaited<ReturnType<PrismaClient['keywordCategory']['findUniqueOrThrow']>>;
 type Translate = (messages: { en: string; ar: string }) => string;
