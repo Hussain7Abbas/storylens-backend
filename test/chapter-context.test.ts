@@ -266,3 +266,22 @@ live(
     expect(chapter.contextLeaseToken).toBeNull();
   },
 );
+
+
+live('explicit context regeneration replaces unchanged source text while preserving automatic reuse', async () => {
+  const chapter = 55;
+  await publish(chapter);
+  const body = { contentHash: hash(chapter), language: 'en', regenerate: true };
+  const denied = await call<{ token: string | null }>(other, 'POST', `${path(chapter)}/claim`, body);
+  expect(denied.body.token).toBeNull();
+  const automatic = await call<{ token: string | null }>(reader, 'POST', `${path(chapter)}/claim`, { ...body, onlyIfMissing: true });
+  expect(automatic.body.token).toBeNull();
+  const claim = await call<{ token: string }>(reader, 'POST', `${path(chapter)}/claim`, body);
+  expect(claim.body.token).toBeString();
+  const replacement = { ...sampleContext(chapter), summary: 'A newly generated summary for the same chapter.' };
+  expect((await call(reader, 'PUT', path(chapter), { ...body, token: claim.body.token, context: replacement })).status).toBe(200);
+  const row = await prisma.chapter.findUniqueOrThrow({ where: { novelId_number: { novelId, number: chapter } } });
+  expect(row.context).toEqual(replacement);
+  expect(row.contextLeaseToken).toBeNull();
+  expect((await call(reader, 'PUT', path(chapter), { ...body, token: claim.body.token, context: replacement })).status).toBe(200);
+});
