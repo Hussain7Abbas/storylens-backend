@@ -1,3 +1,4 @@
+import { AI_INSTRUCTION_MAX_LENGTH, isAiInstructionKey } from '@/lib/ai/instructions';
 import { REASONING_EFFORTS, IMAGE_QUALITIES, type ReasoningEffort, type ImageQuality } from '@/lib/ai/generation-settings';
 import type { PrismaClient } from '@prisma/client';
 import { MAX_PRICE_MICROS, parseUsdToMicros } from './money';
@@ -7,11 +8,16 @@ import { MAX_PRICE_MICROS, parseUsdToMicros } from './money';
  * dashboard's Configs page. Values are strings there; this module parses them.
  */
 export const BILLING_CONFIG_KEYS = {
+  AI_Keyword_Prompt: 'Shared keyword-generation template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
+  AI_Image_Prompt: 'Shared character-image template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
+  AI_Chapter_Cover_Prompt: 'Shared chapter-cover template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
+  AI_Chapter_Context_Prompt: 'Shared chapter-context template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
+  AI_Page_Summary_Prompt: 'Shared page-summary template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
   Lens_Price_USD: 'Price of one lens in US dollars, up to 6 decimals (for example 0.01). Missing or invalid: buying lenses is unavailable.',
   AI_Lens_Balance: 'Available whole lenses to sell or gift (0–999999999). Deducted on approved sales and dashboard gifts; missing means zero.',
   Lens_Trial_Gift: 'Lenses given once to each new registered reader. 0 gives nothing and shows no celebration.',
-  Lens_Request_Min: 'Smallest lens request (whole lenses).',
-  Lens_Request_Max: 'Largest lens request (whole lenses, at most 50000).',
+  Lens_Request_Min: 'Legacy setting retained for compatibility; requests now have a fixed minimum of 500 lenses.',
+  Lens_Request_Max: 'Legacy setting retained for compatibility; requests now allow up to 2147483647 lenses (PostgreSQL Int).',
   Lens_Pending_Requests_Max: 'Pending requests one reader may have at a time (1–20).',
   Billing_Notify_Email: 'Email that receives each new lens request with the reader’s contact. Empty: DASHBOARD_ADMIN_EMAIL.',
   AI_Cloud_Enabled: 'true turns Story Lens Cloud AI on; false answers every cloud AI request as unavailable.',
@@ -27,7 +33,8 @@ export const BILLING_CONFIG_KEYS = {
 
 export type BillingConfigKey = keyof typeof BILLING_CONFIG_KEYS;
 
-export const LENS_REQUEST_LIMIT = 50_000;
+export const LENS_REQUEST_MIN = 500;
+export const LENS_REQUEST_LIMIT = 2_147_483_647;
 
 export const DEFAULT_TEXT_MODEL = 'google/gemini-2.5-flash';
 export const DEFAULT_IMAGE_MODEL = 'bytedance-seed/seedream-5-0-flash';
@@ -56,7 +63,7 @@ export type BillingConfig = {
 type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
 
 function integer(text: string, min: number, max: number): Parsed<number> {
-  if (!/^\d{1,9}$/.test(text.trim())) return { ok: false, message: `a whole number from ${min} to ${max}` };
+  if (!/^\d{1,10}$/.test(text.trim())) return { ok: false, message: `a whole number from ${min} to ${max}` };
   const value = Number(text.trim());
   if (value < min || value > max) return { ok: false, message: `a whole number from ${min} to ${max}` };
   return { ok: true, value };
@@ -74,6 +81,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Checks one value; `null` means valid. Unknown keys stay free-form. */
 export function validateConfigValue(key: string, value: string): string | null {
+  if (isAiInstructionKey(key)) return value.length <= AI_INSTRUCTION_MAX_LENGTH ? null : `${key} must be at most ${AI_INSTRUCTION_MAX_LENGTH} characters.`;
   const trimmed = value.trim();
   switch (key as BillingConfigKey) {
     case 'Lens_Price_USD': {
@@ -147,11 +155,9 @@ export function parseBillingConfig(rows: Array<{ key: string; value: string }>):
     return fallback;
   };
 
-  const requestMin = read('Lens_Request_Min', (text) => integer(text, 1, LENS_REQUEST_LIMIT), 100);
-  const requestMax = Math.max(
-    requestMin,
-    read('Lens_Request_Max', (text) => integer(text, 1, LENS_REQUEST_LIMIT), LENS_REQUEST_LIMIT),
-  );
+  // These bounds are fixed; older saved Config values must not retain the old cap.
+  const requestMin = LENS_REQUEST_MIN;
+  const requestMax = LENS_REQUEST_LIMIT;
   const notify = values.get('Billing_Notify_Email');
 
   return {
@@ -176,7 +182,7 @@ export function parseBillingConfig(rows: Array<{ key: string; value: string }>):
 /** Reads every billing key in one query. Not cached: dashboard edits apply at once. */
 export async function getBillingConfig(prisma: Pick<PrismaClient, 'config'>): Promise<BillingConfig> {
   const rows = await prisma.config.findMany({
-    where: { key: { in: Object.keys(BILLING_CONFIG_KEYS) } },
+    where: { key: { in: Object.keys(BILLING_CONFIG_KEYS).filter(key => !isAiInstructionKey(key)) } },
     select: { key: true, value: true },
   });
   return parseBillingConfig(rows);

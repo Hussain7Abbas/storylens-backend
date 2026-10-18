@@ -12,6 +12,8 @@ const PRICE_VECTORS: Array<[lenses: number, micros: number, cents: number]> = [
   [1, 5_000, 1],
   [7, 1_234_567, 864],
   [50_000, 9_999_999_999, 49_999_999_995],
+  [2_147_483_647, 9_999_999_999, 2_147_483_646_785_252],
+  [2_147_483_646, 9_999_999_998, 2_147_483_645_570_503],
 ];
 
 describe('money', () => {
@@ -52,8 +54,8 @@ describe('billing config', () => {
     expect(config).toMatchObject({
       lensPriceMicros: 10_000,
       trialLenses: 10,
-      requestMin: 100,
-      requestMax: 50_000,
+      requestMin: 500,
+      requestMax: 2_147_483_647,
       pendingMax: 3,
       cloudAiEnabled: true,
       dailySpendCapMicros: 5_000_000,
@@ -80,12 +82,13 @@ describe('billing config', () => {
     expect(parseBillingConfig([{key:'AI_Reasoning_Effort',value:'bad'}, {key:'AI_Reasoning_Token_Allowance',value:'999999'}, {key:'AI_Image_Quality',value:'bad'}])).toMatchObject({reasoningEffort:'auto',reasoningTokenAllowance:4096,imageQuality:'auto'});
   });
 
-  it('never lets the request maximum fall below the minimum', () => {
+  it('uses fixed request bounds even when old saved settings differ', () => {
     const config = parseBillingConfig([
       { key: 'Lens_Request_Min', value: '500' },
       { key: 'Lens_Request_Max', value: '100' },
     ]);
-    expect(config.requestMax).toBe(500);
+    expect(config).toMatchObject({requestMin: 500, requestMax: 2_147_483_647});
+    expect(parseBillingConfig([{key:"Lens_Request_Min",value:"1000"},{key:"Lens_Request_Max",value:"50000"}])).toMatchObject({requestMin:500,requestMax:2_147_483_647});
   });
 
   it('validates known keys on save and leaves others free-form', () => {
@@ -99,6 +102,8 @@ describe('billing config', () => {
     expect(validateConfigValue('Billing_Notify_Email', 'owner@example.com')).toBeNull();
     expect(validateConfigValue('Billing_Notify_Email', 'nope')).not.toBeNull();
     expect(validateConfigValue('Review_Version', 'anything')).toBeNull();
+    expect(validateConfigValue('Lens_Request_Max', '2147483647')).toBeNull();
+    expect(validateConfigValue('Lens_Request_Max', '2147483648')).not.toBeNull();
     expect(validateConfigValue('AI_Reasoning_Effort', 'xhigh')).toBeNull();
     expect(validateConfigValue('AI_Reasoning_Effort', 'extreme')).not.toBeNull();
     expect(validateConfigValue('AI_Reasoning_Token_Allowance', '32768')).toBeNull();

@@ -88,6 +88,7 @@ beforeAll(async () => {
   await setConfig('AI_Lens_Balance', '1000000');
   await setConfig('Lens_Price_USD', '0.01');
   await setConfig('Lens_Request_Min', '100');
+  await setConfig('Lens_Request_Max', '50000');
   await setConfig('Lens_Pending_Requests_Max', '3');
   await setConfig('Billing_Notify_Email', 'owner@example.invalid');
   [reader, other, guest] = await Promise.all([
@@ -115,7 +116,7 @@ describe('pricing', () => {
       available: true,
       lensPriceUsd: '0.010000',
       lensPriceMicros: 10_000,
-      request: { min: 100, max: 50_000, pendingMax: 3 },
+      request: { min: 500, max: 2_147_483_647, pendingMax: 3 },
     });
     const summary = response.body.features.find((feature) => feature.key === 'page_summary');
     expect(summary).toMatchObject({ lenses: 2, enabled: true, maxPromptChars: 64_000 });
@@ -170,8 +171,8 @@ describe('lens requests', () => {
   });
 
   live('checks the amount, the quote and the contact', async () => {
-    const low = await call<Json>(reader, 'POST', '/billing/requests', requestBody({ lenses: 99 }));
-    expect([low.status, low.body.code, low.body.min, low.body.max]).toEqual([400, 'LENS_AMOUNT_OUT_OF_RANGE', 100, 50_000]);
+    const low = await call<Json>(reader, 'POST', '/billing/requests', requestBody({ lenses: 499 }));
+    expect([low.status, low.body.code, low.body.min, low.body.max]).toEqual([400, 'LENS_AMOUNT_OUT_OF_RANGE', 500, 2_147_483_647]);
     const stale = await call<Json>(reader, 'POST', '/billing/requests', requestBody({ quotedLensPriceUsd: '0.02' }));
     expect([stale.status, stale.body.code, stale.body.lensPriceUsd]).toEqual([409, 'PRICE_CHANGED', '0.010000']);
     for (const [channel, handle] of [['WHATSAPP', '07701234567'], ['TELEGRAM', '@ab']]) {
@@ -181,13 +182,27 @@ describe('lens requests', () => {
     expect((await call(reader, 'POST', '/billing/requests', requestBody({ contactHandle: undefined }))).status).toBe(422);
   });
 
+  live('accepts the PostgreSQL Int maximum with an exact largest-price total and rejects larger amounts', async () => {
+    const actor = await makeActor('reader', marker);
+    ids.users.push(actor.id);
+    const excessive = await call<Json>(actor, 'POST', '/billing/requests', requestBody({ lenses: 2_147_483_648 }));
+    expect([excessive.status, excessive.body.code]).toEqual([400, 'LENS_AMOUNT_OUT_OF_RANGE']);
+    await setConfig('Lens_Price_USD', '9999.999999');
+    try {
+      const result = await call<{request: RequestRow}>(actor, 'POST', '/billing/requests', requestBody({lenses: 2_147_483_647, quotedLensPriceUsd: '9999.999999'}));
+      expect(result.status).toBe(200);
+      expect(result.body.request).toMatchObject({lenses: 2_147_483_647, totalUsd:'21474836467852.52'});
+      expect((await prisma.billingRequest.findUniqueOrThrow({where:{id:result.body.request.id}})).totalUsd.toFixed(2)).toBe('21474836467852.52');
+    } finally { await setConfig('Lens_Price_USD','0.01'); }
+  });
+
   live('stores a priced snapshot with the normalized contact', async () => {
     const created = await call<{ request: RequestRow }>(other, 'POST', '/billing/requests', requestBody({
-      lenses: 333, contactChannel: 'TELEGRAM', contactHandle: '@Story_Lens',
+      lenses: 533, contactChannel: 'TELEGRAM', contactHandle: '@Story_Lens',
     }));
     expect(created.status).toBe(200);
     expect(created.body.request).toMatchObject({
-      lenses: 333, unitPriceUsd: '0.010000', totalUsd: '3.33', status: 'PENDING', contactHandle: '@story_lens',
+      lenses: 533, unitPriceUsd: '0.010000', totalUsd: '5.33', status: 'PENDING', contactHandle: '@story_lens',
     });
     const stored = await prisma.billingRequest.findUniqueOrThrow({ where: { id: created.body.request.id } });
     expect(stored.userEmail).toContain(marker);
@@ -245,7 +260,7 @@ describe('lens requests', () => {
 
 describe('dashboard review', () => {
   live('lists requests with the current and snapshot emails and the contact', async () => {
-    const created = await call<{ request: RequestRow }>(other, 'POST', '/billing/requests', requestBody({ lenses: 200 }));
+    const created = await call<{ request: RequestRow }>(other, 'POST', '/billing/requests', requestBody({ lenses: 500 }));
     const user = await prisma.user.findUniqueOrThrow({ where: { id: other.id } });
     await prisma.user.update({ where: { id: other.id }, data: { email: `changed-${marker}@example.invalid` } });
     const list = await adminCall<{ data: Array<Json & { user: Json; userEmail: string }>; counts: Json }>(
@@ -261,19 +276,19 @@ describe('dashboard review', () => {
   live('approves once, credits the lenses and emails the reader', async () => {
     const approver = await makeActor('reader', marker);
     ids.users.push(approver.id);
-    const created = await call<{ request: RequestRow }>(approver, 'POST', '/billing/requests', requestBody({ lenses: 150 }));
+    const created = await call<{ request: RequestRow }>(approver, 'POST', '/billing/requests', requestBody({ lenses: 500 }));
     const id = created.body.request.id;
     const results = await Promise.all([
       adminCall<Json>('POST', `/billing/requests/${id}/approve`),
       adminCall<Json>('POST', `/billing/requests/${id}/approve`),
     ]);
     expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
-    expect(await balanceOf(approver.id)).toBe(150);
+    expect(await balanceOf(approver.id)).toBe(500);
     expect(await prisma.lensTransaction.count({ where: { billingRequestId: id, type: 'TOP_UP' } })).toBe(1);
     const email = await prisma.user.findUniqueOrThrow({ where: { id: approver.id }, select: { email: true } });
-    expect(sent.some((message) => message.to === email.email && message.text.includes('150'))).toBe(true);
+    expect(sent.some((message) => message.to === email.email && message.text.includes('500'))).toBe(true);
     const notices = await call<{ notices: Json[] }>(approver, 'GET', '/billing/balance?surface=extension');
-    expect(notices.body.notices).toEqual([expect.objectContaining({ type: 'TOP_UP', lenses: 150 })]);
+    expect(notices.body.notices).toEqual([expect.objectContaining({ type: 'TOP_UP', lenses: 500 })]);
   });
 
   live('refuses to approve cancelled requests and deleted readers', async () => {
@@ -414,16 +429,16 @@ describe('available lens inventory', () => {
   live('serializes concurrent sales and gifts and rolls a refused approval back to pending', async () => {
     const actors = await Promise.all([makeActor('reader', marker), makeActor('reader', marker)]);
     ids.users.push(...actors.map(actor => actor.id));
-    const sale = await call<{ request: RequestRow }>(actors[0]!, 'POST', '/billing/requests', requestBody({ lenses: 100 }));
+    const sale = await call<{ request: RequestRow }>(actors[0]!, 'POST', '/billing/requests', requestBody({ lenses: 500 }));
     expect(sale.status).toBe(200);
-    await setConfig('AI_Lens_Balance', '100');
+    await setConfig('AI_Lens_Balance', '500');
     try {
       const results = await Promise.all([
         adminCall('POST', `/billing/requests/${sale.body.request.id}/approve`),
-        adminCall('POST', `/users/${actors[1]!.id}/lenses/gifts`, { id: crypto.randomUUID(), lenses: 100 }),
+        adminCall('POST', `/users/${actors[1]!.id}/lenses/gifts`, { id: crypto.randomUUID(), lenses: 500 }),
       ]);
       expect(results.map(result => result.status).sort()).toEqual([200, 409]);
-      expect(await balanceOf(actors[0]!.id) + await balanceOf(actors[1]!.id)).toBe(100);
+      expect(await balanceOf(actors[0]!.id) + await balanceOf(actors[1]!.id)).toBe(500);
       expect((await prisma.config.findUniqueOrThrow({ where: { key: 'AI_Lens_Balance' } })).value).toBe('0');
       if (results[0]!.status === 409) expect((await prisma.billingRequest.findUniqueOrThrow({ where: { id: sale.body.request.id } })).status).toBe('PENDING');
     } finally { await setConfig('AI_Lens_Balance', '1000000'); }

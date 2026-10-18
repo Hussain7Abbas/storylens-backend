@@ -285,3 +285,43 @@ live('explicit context regeneration replaces unchanged source text while preserv
   expect(row.contextLeaseToken).toBeNull();
   expect((await call(reader, 'PUT', path(chapter), { ...body, token: claim.body.token, context: replacement })).status).toBe(200);
 });
+
+live('compact tracking uses one nearest previous chapter, bulk restores returning elements and expires absence at ten', async () => {
+ await publish(100, sampleContext(100, 'Visible scar'));
+ const leo = sampleContext(102);
+ const scene = leo.scenes[0];
+ if (!scene?.entities[0]) throw new Error('Missing fixture');
+ scene.entities[0].entityKey = 'name:leo';
+ scene.entities[0].name = 'Leo';
+ await publish(102, leo);
+ await publish(106, sampleContext(106, null));
+ const tracking = await call<{previous: {chapterNumber: number; context: ChapterContext} | null; lastSeen: {entityKey: string; lastSeenChapter: number}[]}>(guest, 'POST', `${path(104)}/tracking`, {entityKeys: ['name:mira']});
+ expect(tracking.status).toBe(200);
+ expect(tracking.body.previous?.chapterNumber).toBe(102);
+ expect(tracking.body.lastSeen.find(entity => entity.entityKey === 'name:mira')?.lastSeenChapter).toBe(100);
+ expect(JSON.stringify(tracking.body)).not.toContain('missingChapters');
+ expect(JSON.stringify(tracking.body)).not.toContain('"chapterNumber":106');
+ const bulk = await call<{chapters: {chapterNumber: number; context: ChapterContext}[]}>(guest, 'POST', `${path(104)}/bulk`, {chapterNumbers: [102, 100, 100], entityKeys: ['name:mira']});
+ expect(bulk.status).toBe(200);
+ expect(bulk.body.chapters.map(chapter => chapter.chapterNumber)).toEqual([100, 102]);
+ expect(bulk.body.chapters[0]?.context.stateChanges[0]?.value).toBe('Visible scar');
+ expect(bulk.body.chapters[1]?.context.scenes).toEqual([]);
+ for (const chapterNumbers of [[104], [106], [-1], [1.5], [2147483648], Array(81).fill(100)])
+  expect((await call(reader, 'POST', `${path(104)}/bulk`, {chapterNumbers})).status).toBe(422);
+ expect((await call(null, 'POST', `${path(104)}/bulk`, {chapterNumbers: [100]})).status).toBe(401);
+ expect((await call(reader, 'POST', `${path(104)}/tracking`, {entityKeys: ['invalid']})).status).toBe(422);
+ const before = await call<{inactiveEntities: {entityKey: string; name: string; keywordId: string | null; lastSeenChapter: number}[]}>(guest, 'GET', `${path(111)}?format=compact`);
+ expect(before.body.inactiveEntities.find(entity => entity.entityKey === 'name:leo')).toEqual({entityKey: 'name:leo', name: 'Leo', keywordId: null, lastSeenChapter: 102});
+ const after = await call<typeof before.body>(guest, 'GET', `${path(112)}?format=compact`);
+ expect(after.body.inactiveEntities.some(entity => entity.entityKey === 'name:leo')).toBe(false);
+ expect(JSON.stringify(after.body)).not.toContain('missingChapters');
+ expect(JSON.stringify(after.body)).not.toContain('lastMentionedChapter');
+ // History survives expiry, and revisits do not advance last seen.
+ expect((await call<typeof tracking.body>(reader, 'POST', `${path(200)}/tracking`, {entityKeys: ['name:leo']})).body.lastSeen.find(entity => entity.entityKey === 'name:leo')?.lastSeenChapter).toBe(102);
+ await publish(103, {...sampleContext(103), scenes: []});
+ expect((await call<typeof tracking.body>(guest, 'POST', `${path(104)}/tracking`, {entityKeys: []})).body.previous?.chapterNumber).toBe(103);
+ expect((await call<typeof tracking.body>(guest, 'POST', `${path(0)}/tracking`, {entityKeys: []})).body.previous).toBeNull();
+ expect((await call<{chapters: unknown[]}>(guest, 'POST', `${path(104)}/bulk`, {chapterNumbers: []})).body.chapters).toEqual([]);
+ const isolated = await call<typeof tracking.body>(guest, 'POST', `/chapter-context/${crypto.randomUUID()}/104/tracking`, {entityKeys: ['name:mira']});
+ expect(isolated.body).toEqual({previous: null, lastSeen: []});
+});

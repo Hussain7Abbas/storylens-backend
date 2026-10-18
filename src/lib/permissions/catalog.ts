@@ -74,6 +74,8 @@ export const PUBLIC_ENDPOINTS = new Set<string>([
 
 /** User-portal writes a guest may make (everything else that writes needs a reader). */
 const GUEST_WRITES = new Set<string>([
+  'POST /api/user/chapter-context/:novelId/:chapterNumber/tracking',
+  'POST /api/user/chapter-context/:novelId/:chapterNumber/bulk',
   'PUT /api/user/color-preferences/:kind/:id',
   'PUT /api/user/auth/me',
   'POST /api/user/auth/logout',
@@ -141,6 +143,7 @@ export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
   'POST /api/user/auth/change-email': 'Request an email change code',
   'POST /api/user/auth/change-email/verify': 'Confirm an email change',
   'POST /api/user/ai/chapter-selectors': 'Detect chapter selectors with AI (deprecated: use cloud AI prompts)',
+  'GET /api/user/ai/instructions': 'Read shared AI instruction templates',
   'POST /api/user/ai/prompts': 'Run a Story Lens Cloud AI text action (uses lenses)',
   'POST /api/user/ai/images': 'Draw a character image with Story Lens Cloud AI (uses lenses)',
   'GET /api/user/novels/': 'List novels',
@@ -152,6 +155,8 @@ export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
   'GET /api/user/chapters/novel/:novelId': 'List a novel’s chapters',
   'GET /api/user/chapter-context/:novelId/:chapterNumber': 'Read chapter context',
   'GET /api/user/chapter-context/:novelId/:chapterNumber/continuity': 'Load image continuity context',
+  'POST /api/user/chapter-context/:novelId/:chapterNumber/tracking': 'Read previous context and returning element pointers',
+  'POST /api/user/chapter-context/:novelId/:chapterNumber/bulk': 'Read earlier chapter contexts in bulk',
   'POST /api/user/chapter-context/:novelId/:chapterNumber/claim': 'Generate chapter context',
   'PUT /api/user/chapter-context/:novelId/:chapterNumber': 'Publish chapter context',
   'DELETE /api/user/chapter-context/:novelId/:chapterNumber/claim': 'Release chapter context generation',

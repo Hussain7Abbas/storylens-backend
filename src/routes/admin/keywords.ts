@@ -92,7 +92,7 @@ async function addNamesAsAliases(
     wordVfx: WordVfx;
     wordVfxColor: string | null;
     mainThemeColor: string | null;
-    versions: { descriptionAr: string | null; descriptionEn: string | null; description: string | null; categoryId: string | null; natureId: string | null; imageId: string | null }[];
+    versions: { descriptionAr: string | null; descriptionEn: string | null; description: string | null; categoryId: string | null; natureId: string | null; imageId: string | null; imagePrompt: string | null }[];
   },
 ) {
   const taken = takenAliasNames(target.aliases);
@@ -117,6 +117,7 @@ async function addNamesAsAliases(
       descriptionEn: base?.descriptionEn ?? null,
       categoryId: base?.categoryId ?? null,
       natureId: base?.natureId ?? null,
+      imagePrompt: base?.imagePrompt ?? null,
       imageId: base?.imageId ?? null,
     },
   });
@@ -430,6 +431,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
           where: { id: alias.id },
           data: {
             [column]: name,
+            imagePrompt: alias.imageId ? alias.imagePrompt : base?.imageId ? base.imagePrompt : alias.imagePrompt ?? base?.imagePrompt,
             imageId: mergeShared(alias.imageId, base?.imageId),
             categoryId: mergeShared(alias.categoryId, base?.categoryId),
             natureId: mergeShared(alias.natureId, base?.natureId),
@@ -507,6 +509,7 @@ export const adminKeywords = new Elysia({ prefix: '/keywords', tags: ['Admin: Ke
             descriptionEn: base?.descriptionEn ?? null,
             categoryId: base?.categoryId ?? null,
             natureId: base?.natureId ?? null,
+            imagePrompt: base?.imagePrompt ?? null,
             imageId: base?.imageId ?? null,
           },
         });
