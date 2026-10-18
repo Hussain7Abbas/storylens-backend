@@ -1,6 +1,6 @@
 import { Elysia } from 'elysia';
 import { adminAiModels } from './ai-models';
-import { adminAiPricing } from './ai-pricing';
+import { adminAiInstructions, adminAiPricing } from './ai-pricing';
 import { adminAuth } from './auth';
 import { adminBilling } from './billing';
 import { adminConfigs } from './configs';
@@ -24,6 +24,7 @@ export const adminApi = new Elysia({ prefix: '/api/admin' })
   .use(adminUserLenses)
   .use(adminBilling)
   .use(adminAiPricing)
+  .use(adminAiInstructions)
   .use(adminAiModels)
   .use(adminRoles)
   .use(adminPermissions)

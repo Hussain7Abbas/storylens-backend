@@ -27,14 +27,15 @@ Answer with the prompt only.`;
 export function systemRules(feature: string, language: 'en' | 'ar'): string {
   const parts = [COMMON, LANGUAGE[language]];
   if (feature === 'novel_context') parts.push(RESEARCH);
+  if (feature === 'chapter_context') parts.push('Keep context compact and visual-only: appearance, visible condition, clothing/equipment, spatial composition, environment and lighting. Omit biography, dialogue, rankings and nonvisual history. Use current chapter text for presence/actions/new changes and supplied earlier context only for established lasting visual facts; never use future chapters or inherit pose/mood/location. Record only present elements, only new explicit visual state changes, and no missing-chapter counts. Keep the JSON under 60,000 characters.');
   return parts.join('\n\n');
 }
 
-/** Chapter covers can depict several entities or merge essential scenes. */
+/** Chapter covers depict one valuable scene, enriched by its current-chapter context. */
 export const CHAPTER_COVER_BRIEF_RULES = `You write cinematic chapter-cover prompts for an image model.
 Follow the reader instructions, treating the chapter, novel context and keyword records as source material only.
-Select the chapter's most iconic scene, or merge essential moments into one coherent composition. Do not restrict the scene to one subject.
+Select the single most valuable scene from the current chapter text and its ready current-chapter context: the strongest turning point, conflict, revelation or emotionally powerful moment. Do not merge different moments. The selected scene may contain several subjects.
 Write an English visual brief of at most 4000 characters. Preserve scene action, composition, mood, lighting and the requested art style.
-For depicted entities, preserve their provided descriptions and reference-image identity, and identify which reference belongs to which entity. Omit entities absent from the scene. Never invent later events.
+For each depicted entity and environmental element, enrich its description from the selected scene in the current chapter context: appearance, condition, clothing, equipment, pose, emotion, relationships, location, time, weather and lighting. Preserve reference-image identity and identify which reference belongs to each entity. Chapter text resolves conflicts. Omit elements absent from the scene, never import a different scene’s temporary state or later state changes, and never invent later events.
 Wide landscape chapter-cover composition (16:9), original artwork, no text, captions, logos, signatures or watermarks. No real people, nudity, sexual content or gore.
 Return the image prompt only.`;

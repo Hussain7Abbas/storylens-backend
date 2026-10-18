@@ -418,7 +418,9 @@ live('chapter covers use a scene brief, landscape ratio, reference images and th
   const referenceImageUrls = ['https://images.example.invalid/mira.jpg'];
   const response = await post(actor, 'images', { actionId: crypto.randomUUID(), feature: 'chapter_cover', prompt: 'Mira raises her sword at the burning bridge.', referenceImageUrls });
   expect(response.last?.type).toBe('result');
-  expect(ai.chats.at(-1)?.system).toContain('most iconic scene');
+  expect(ai.chats.at(-1)?.system).toContain('single most valuable scene');
+  expect(ai.chats.at(-1)?.system).toContain('ready current-chapter context');
+  expect(ai.chats.at(-1)?.system).toContain('Do not merge different moments');
   expect(ai.images.at(-1)?.aspectRatio).toBe('16:9');
   expect(ai.images.at(-1)?.referenceImageUrls).toEqual(referenceImageUrls);
   expect(await balanceOf(actor)).toBe(7);

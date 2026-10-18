@@ -1,3 +1,5 @@
+import { getAiInstructions } from '@/lib/ai/instructions';
+import { aiInstructionsSchema } from '@/schemas/ai-instructions';
 import { detectChapterSelectors } from '@/lib/ai';
 import { Elysia, t } from 'elysia';
 import { env } from '@/env';
@@ -22,6 +24,11 @@ export const ai = new Elysia({
 })
   .use(setup)
   .use(authorize('user'))
+
+  .get('/instructions', async ({ prisma }) => (await getAiInstructions(prisma)).prompts, {
+    response: { 200: aiInstructionsSchema },
+    detail: { summary: 'Read shared AI instruction templates' },
+  })
 
   .post(
     '/chapter-selectors',

@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+import { isAiInstructionKey } from '@/lib/ai/instructions';
 import { LENS_INVENTORY_KEY, lockLensInventory } from '@/lib/billing/inventory';
 import { ConfigPlain } from '@/lib/db';
 import { Elysia, t } from 'elysia';
@@ -83,12 +85,13 @@ export const adminConfigs = new Elysia({
       }
       const config = await prisma.$transaction(async (tx) => {
         let updatedAt: Date | undefined;
-        if (body.key === LENS_INVENTORY_KEY) {
-          await lockLensInventory(tx);
+        if (body.key === LENS_INVENTORY_KEY || isAiInstructionKey(body.key)) {
+          if (body.key === LENS_INVENTORY_KEY) await lockLensInventory(tx);
+          else await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${body.key}))`);
           const current = await tx.config.findUnique({ where: { key: body.key } });
           updatedAt = new Date(Math.max(Date.now(), (current?.updatedAt.getTime() ?? 0) + 1));
           if (body.baseUpdatedAt !== undefined && body.baseUpdatedAt !== (current?.updatedAt.toISOString() ?? null)) {
-            throw new HttpError({ statusCode: 409, code: 'CONFIG_STALE', message: 'The available balance changed. Reload it before saving.' });
+            throw new HttpError({ statusCode: 409, code: 'CONFIG_STALE', message: body.key === LENS_INVENTORY_KEY ? 'The available balance changed. Reload it before saving.' : 'This AI prompt changed. Reload it before saving.' });
           }
         }
         return tx.config.upsert({
@@ -119,6 +122,7 @@ export const adminConfigs = new Elysia({
     async ({ prisma, params: { key } }) => {
       const existingConfig = await prisma.$transaction(async (tx) => {
         if (key === LENS_INVENTORY_KEY) await lockLensInventory(tx);
+        else if (isAiInstructionKey(key)) await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
         const current = await tx.config.findUnique({ where: { key } });
         if (!current) throw new HttpError({ message: 'Config not found', statusCode: 404 });
         await tx.config.delete({ where: { key } });

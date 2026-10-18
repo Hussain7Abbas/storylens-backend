@@ -20,16 +20,15 @@ export async function inactiveEntities(
   >`
     SELECT DISTINCT ON ("entityKey") "entityKey", "name", "keywordId", "chapterNumber"
     FROM "ChapterMention" WHERE "novelId" = ${novelId} AND "chapterNumber" <= ${chapterNumber}
-    AND "chapterNumber" >= ${Math.max(0, chapterNumber - 15)}
+    AND "chapterNumber" >= ${Math.max(0, chapterNumber - 9)}
     ORDER BY "entityKey", "chapterNumber" DESC LIMIT 200`;
   return rows
-    .filter((row) => row.chapterNumber < chapterNumber && chapterNumber - row.chapterNumber < 15)
+    .filter((row) => row.chapterNumber < chapterNumber && chapterNumber - row.chapterNumber < 10)
     .map((row) => ({
       entityKey: row.entityKey,
       name: row.name,
       keywordId: row.keywordId,
-      lastMentionedChapter: row.chapterNumber,
-      missingChapters: chapterNumber - row.chapterNumber,
+      lastSeenChapter: row.chapterNumber,
     }));
 }
 export function mentionRecords(context: ChapterContext) {

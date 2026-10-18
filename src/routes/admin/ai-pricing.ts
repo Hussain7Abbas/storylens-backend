@@ -1,3 +1,5 @@
+import { getAiInstructions } from '@/lib/ai/instructions';
+import { adminAiInstructionsSchema } from '@/schemas/ai-instructions';
 import { Elysia, t } from 'elysia';
 import { aiFeaturePriceSchema } from '@/lib/billing/serialize';
 import { authorize } from '@/middleware/authorize';
@@ -71,3 +73,11 @@ export const adminAiPricing = new Elysia({ prefix: '/ai-pricing', tags: ['Admin:
       detail: { summary: 'Update an AI feature price' },
     },
   );
+
+export const adminAiInstructions = new Elysia({ prefix: '/ai-instructions', tags: ['Admin: AI pricing'] })
+  .use(setup)
+  .use(authorize('admin'))
+  .get('/', ({ prisma }) => getAiInstructions(prisma), {
+    response: { 200: adminAiInstructionsSchema },
+    detail: { summary: 'Read shared AI instruction templates and defaults' },
+  });

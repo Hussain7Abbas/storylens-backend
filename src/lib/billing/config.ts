@@ -1,3 +1,4 @@
+import { AI_INSTRUCTION_MAX_LENGTH, isAiInstructionKey } from '@/lib/ai/instructions';
 import { REASONING_EFFORTS, IMAGE_QUALITIES, type ReasoningEffort, type ImageQuality } from '@/lib/ai/generation-settings';
 import type { PrismaClient } from '@prisma/client';
 import { MAX_PRICE_MICROS, parseUsdToMicros } from './money';
@@ -7,6 +8,11 @@ import { MAX_PRICE_MICROS, parseUsdToMicros } from './money';
  * dashboard's Configs page. Values are strings there; this module parses them.
  */
 export const BILLING_CONFIG_KEYS = {
+  AI_Keyword_Prompt: 'Shared keyword-generation template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
+  AI_Image_Prompt: 'Shared character-image template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
+  AI_Chapter_Cover_Prompt: 'Shared chapter-cover template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
+  AI_Chapter_Context_Prompt: 'Shared chapter-context template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
+  AI_Page_Summary_Prompt: 'Shared page-summary template. Edit in Settings → AI; blank uses the default (maximum 20000 characters).',
   Lens_Price_USD: 'Price of one lens in US dollars, up to 6 decimals (for example 0.01). Missing or invalid: buying lenses is unavailable.',
   AI_Lens_Balance: 'Available whole lenses to sell or gift (0–999999999). Deducted on approved sales and dashboard gifts; missing means zero.',
   Lens_Trial_Gift: 'Lenses given once to each new registered reader. 0 gives nothing and shows no celebration.',
@@ -75,6 +81,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Checks one value; `null` means valid. Unknown keys stay free-form. */
 export function validateConfigValue(key: string, value: string): string | null {
+  if (isAiInstructionKey(key)) return value.length <= AI_INSTRUCTION_MAX_LENGTH ? null : `${key} must be at most ${AI_INSTRUCTION_MAX_LENGTH} characters.`;
   const trimmed = value.trim();
   switch (key as BillingConfigKey) {
     case 'Lens_Price_USD': {
@@ -175,7 +182,7 @@ export function parseBillingConfig(rows: Array<{ key: string; value: string }>):
 /** Reads every billing key in one query. Not cached: dashboard edits apply at once. */
 export async function getBillingConfig(prisma: Pick<PrismaClient, 'config'>): Promise<BillingConfig> {
   const rows = await prisma.config.findMany({
-    where: { key: { in: Object.keys(BILLING_CONFIG_KEYS) } },
+    where: { key: { in: Object.keys(BILLING_CONFIG_KEYS).filter(key => !isAiInstructionKey(key)) } },
     select: { key: true, value: true },
   });
   return parseBillingConfig(rows);
