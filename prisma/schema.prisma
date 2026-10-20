@@ -302,6 +302,7 @@ model Chapter {
   contextLeaseHash String?
   imageId String?
   image File? @relation("ChapterArtwork", fields: [imageId], references: [id], onDelete: SetNull)
+  imagePrompt String? @db.Text
   coverCreatedById String?
   coverCreatedBy User? @relation("ChapterArtworkCreator", fields: [coverCreatedById], references: [id], onDelete: SetNull)
   coverLeaseToken String?

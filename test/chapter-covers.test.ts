@@ -4,15 +4,15 @@ import { call, cleanup, live, makeActor, type Actor } from './helpers/live-db';
 
 const marker = `cover-${crypto.randomUUID().slice(0, 8)}`;
 const ids = { users: [] as string[], novels: [] as string[] };
-let reader: Actor, other: Actor, guest: Actor;
+let reader: Actor, other: Actor, guest: Actor, moderator: Actor;
 let novelId: string;
 const files: string[] = [];
-type Cover = { image: { id: string; url: string } | null; generating: boolean; token?: string | null };
+type Cover = { image: { id: string; url: string } | null; generating: boolean; imagePrompt: string | null; promptUpdatedAt: string | null; canEditPrompt: boolean; token?: string | null };
 const path = (chapter = 5) => `/chapter-covers/${novelId}/${chapter}`;
 beforeAll(async () => {
   if (process.env.STORYLENS_LIVE_DB_TEST !== '1') return;
-  [reader, other, guest] = await Promise.all([makeActor('reader', marker), makeActor('reader', marker), makeActor('guest', marker)]);
-  ids.users.push(reader.id, other.id, guest.id);
+  [reader, other, guest, moderator] = await Promise.all([makeActor('reader', marker), makeActor('reader', marker), makeActor('guest', marker), makeActor('moderator', marker)]);
+  ids.users.push(reader.id, other.id, guest.id, moderator.id);
   novelId = (await prisma.novel.create({ data: { nameEn: marker, slugs: [marker] } })).id;
   ids.novels.push(novelId);
 });
@@ -27,7 +27,7 @@ async function imageFor(actor: Actor) {
 }
 
 live('covers are shared, guests can read, and only one concurrent reader claims a missing chapter', async () => {
-  expect((await call<Cover>(guest, 'GET', path())).body).toEqual({ image: null, generating: false });
+  expect((await call<Cover>(guest, 'GET', path())).body).toMatchObject({ image: null, generating: false });
   const claims = await Promise.all([reader, other].map(actor => call<Cover>(actor, 'POST', `${path()}/claim`)));
   expect(claims.map(result => result.status)).toEqual([200, 200]);
   expect(claims.filter(result => result.body.token)).toHaveLength(1);
@@ -77,10 +77,60 @@ live('explicit regeneration keeps existing artwork, enforces ownership and seria
   expect(during.body.image?.id).toBe(oldImage.id);
   expect(during.body.generating).toBe(true);
   await call(reader, 'DELETE', `${path(chapter)}/claim`, { token });
-  expect((await call<Cover>(guest, 'GET', path(chapter))).body).toEqual({ image: { id: oldImage.id, url: oldImage.url }, generating: false });
+  expect((await call<Cover>(guest, 'GET', path(chapter))).body).toMatchObject({ image: { id: oldImage.id, url: oldImage.url }, generating: false });
   const next = await call<Cover>(reader, 'POST', `${path(chapter)}/claim`, { regenerate: true });
   const replacement = await imageFor(reader);
   expect((await call(reader, 'PUT', path(chapter), { token, imageId: replacement.id })).status).toBe(409);
   expect((await call(reader, 'PUT', path(chapter), { token: next.body.token, imageId: replacement.id })).status).toBe(200);
   expect((await call<Cover>(guest, 'GET', path(chapter))).body.image?.id).toBe(replacement.id);
+});
+
+
+live('artwork stores the image description, shares it after reload, and protects prompt-only edits', async () => {
+  const url = `/chapter-artwork/${novelId}/21`;
+  const claim = await call<Cover>(reader, 'POST', `${url}/claim`);
+  const image = await imageFor(reader);
+  const prompt = 'A scout in blue robes beneath a red moon.';
+  const saved = await call<Cover>(reader, 'PUT', url, { token: claim.body.token, imageId: image.id, imagePrompt: prompt });
+  expect(saved.status).toBe(200);
+  expect(saved.body).toMatchObject({ imagePrompt: prompt, canEditPrompt: true, generating: false });
+  expect(saved.body.promptUpdatedAt).toBeString();
+  const publicRead = await call<Cover>(guest, 'GET', url);
+  expect(publicRead.body).toMatchObject({ imagePrompt: prompt, canEditPrompt: false });
+  expect(publicRead.body).not.toHaveProperty('coverLeaseToken');
+  expect(publicRead.body).not.toHaveProperty('context');
+  const edit = { imagePrompt: 'A scout in green robes. <plain text>', baseUpdatedAt: saved.body.promptUpdatedAt };
+  expect((await call(other, 'PUT', `${url}/prompt`, edit)).status).toBe(403);
+  expect((await call(guest, 'PUT', `${url}/prompt`, edit)).status).toBe(403);
+  const updates = await Promise.all([1, 2].map(() => call<Cover>(reader, 'PUT', `${url}/prompt`, edit)));
+  expect(updates.map(result => result.status).sort()).toEqual([200, 409]);
+  const updated = await call<Cover>(reader, 'GET', url);
+  expect(updated.body.imagePrompt).toBe(edit.imagePrompt);
+  expect(updated.body.image).toEqual(saved.body.image);
+  expect(updated.body.promptUpdatedAt).not.toBe(saved.body.promptUpdatedAt);
+  // An upload replay must not replace a later prompt edit.
+  await call(reader, 'PUT', url, { token: claim.body.token, imageId: image.id, imagePrompt: prompt });
+  expect((await call<Cover>(reader, 'GET', url)).body.imagePrompt).toBe(edit.imagePrompt);
+  expect((await call<Cover>(moderator, 'GET', url)).body.canEditPrompt).toBe(true);
+  const cleared = await call<Cover>(moderator, 'PUT', `${url}/prompt`, { imagePrompt: '  ', baseUpdatedAt: updated.body.promptUpdatedAt });
+  expect(cleared.status).toBe(200);
+  expect(cleared.body.imagePrompt).toBeNull();
+  expect((await call(reader, 'PUT', `${url}/prompt`, { imagePrompt: 'x'.repeat(180001), baseUpdatedAt: cleared.body.promptUpdatedAt })).status).toBe(422);
+  expect((await call(reader, 'PUT', `${url}/prompt`, { imagePrompt: 'new', baseUpdatedAt: 'invalid' })).status).toBe(422);
+  expect((await call(reader, 'PUT', `/chapter-artwork/${novelId}/99/prompt`, edit)).status).toBe(404);
+});
+
+live('prompt edits cannot race generation and old clients do not carry a previous image prompt into a new image', async () => {
+  const url = `/chapter-artwork/${novelId}/22`;
+  const first = await call<Cover>(reader, 'POST', `${url}/claim`);
+  const image = await imageFor(reader);
+  await call(reader, 'PUT', url, { token: first.body.token, imageId: image.id, imagePrompt: 'The first image.' });
+  const replacement = await call<Cover>(reader, 'POST', `${url}/claim`, { regenerate: true });
+  expect(replacement.body.imagePrompt).toBe('The first image.');
+  expect((await call(reader, 'PUT', `${url}/prompt`, { imagePrompt: 'Conflicting edit', baseUpdatedAt: replacement.body.promptUpdatedAt })).status).toBe(409);
+  const next = await imageFor(reader);
+  const legacy = await call<Cover>(reader, 'PUT', url, { token: replacement.body.token, imageId: next.id });
+  expect(legacy.status).toBe(200);
+  expect(legacy.body.imagePrompt).toBeNull();
+  expect(legacy.body.image?.id).toBe(next.id);
 });
