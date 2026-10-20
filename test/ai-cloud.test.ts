@@ -427,3 +427,17 @@ live('chapter covers use a scene brief, landscape ratio, reference images and th
   expect((await post(actor, 'prompts', promptBody({ feature: 'chapter_cover' }))).json.code).toBe('AI_FEATURE_NOT_FOUND');
   expect((await post(actor, 'images', { actionId: crypto.randomUUID(), feature: 'chapter_cover', prompt: 'Scene', referenceImageUrls: ['file:///private/image.jpg'] })).status).toBe(422);
 });
+
+
+live('saved image descriptions reach the image model unchanged without another brief call', async () => {
+  const actor = await newReader(10);
+  const prompt = 'A blue-cloaked scout beneath two red moons. Keep the bridge empty.';
+  const before = ai.chats.length;
+  const actionId = crypto.randomUUID();
+  const response = await post(actor, 'images', { actionId, feature: 'chapter_cover', prompt, promptIsDescription: true });
+  expect(response.last).toMatchObject({ type: 'result', revisedPrompt: prompt, lensesCharged: 3 });
+  expect(ai.chats.length).toBe(before);
+  expect(ai.images.at(-1)).toMatchObject({ prompt, aspectRatio: '16:9' });
+  const calls = await prisma.aiCall.findMany({ where: { actionId } });
+  expect(calls.map(call => call.step)).toEqual(['main']);
+});

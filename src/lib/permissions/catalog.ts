@@ -162,6 +162,7 @@ export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
   'DELETE /api/user/chapter-context/:novelId/:chapterNumber/claim': 'Release chapter context generation',
   'GET /api/user/chapter-artwork/:novelId/:chapterNumber': 'Read chapter artwork',
   'POST /api/user/chapter-artwork/:novelId/:chapterNumber/claim': 'Generate chapter artwork',
+  'PUT /api/user/chapter-artwork/:novelId/:chapterNumber/prompt': 'Edit a chapter artwork prompt',
   'PUT /api/user/chapter-artwork/:novelId/:chapterNumber': 'Publish chapter artwork',
   'DELETE /api/user/chapter-artwork/:novelId/:chapterNumber/claim': 'Release chapter artwork',
   'GET /api/user/chapter-covers/:novelId/:chapterNumber': 'View a shared chapter cover',

@@ -152,33 +152,36 @@ async function runText(
   }
 }
 
-/** A short brief on the text model, then the image. Never throws. */
+/** Synthesize a visual brief when needed, then draw it. Never throws. */
 async function runImage(
   prisma: PrismaClient,
-  input: { user: AuthUserPayload; price: AiFeaturePrice; textModel: string; imageModel: string; reasoningEffort: ReasoningEffort; reasoningTokenAllowance: number; imageQuality: ImageQuality; actionId: string; prompt: string; referenceImageUrls?: string[]; signal: AbortSignal },
+  input: { user: AuthUserPayload; price: AiFeaturePrice; textModel: string; imageModel: string; reasoningEffort: ReasoningEffort; reasoningTokenAllowance: number; imageQuality: ImageQuality; actionId: string; prompt: string; promptIsDescription?: boolean; referenceImageUrls?: string[]; signal: AbortSignal },
   balance: number,
   lensesCharged: number,
 ): Promise<Outcome> {
   const { price } = input;
-  // The text model shortens the brief; the image model draws.
+  // Saved descriptions go straight to the image model; raw source needs a text brief.
   const briefModel = input.textModel;
   const calls: CallRecord[] = [];
   let started = performance.now();
   let step: CallRecord['step'] = 'brief';
   let model = briefModel;
   try {
-    const brief = await getAiProvider().chat({
-      model: briefModel,
-      system: price.key === 'chapter_cover' ? CHAPTER_COVER_BRIEF_RULES : IMAGE_BRIEF_RULES,
-      prompt: input.prompt,
-      maxTokens: price.maxOutputTokens,
-      reasoningEffort: input.reasoningEffort,
-      reasoningTokenAllowance: input.reasoningTokenAllowance,
-      userId: input.user.id,
-      signal: input.signal,
-    });
-    calls.push({ attempt: 1, step, model, status: 'succeeded', usage: brief.usage, durationMs: performance.now() - started, providerId: brief.providerId, dataPolicy: brief.dataPolicy });
-    const imagePrompt = brief.text.slice(0, price.key === 'chapter_cover' ? 4000 : IMAGE_PROMPT_CHARS);
+    let imagePrompt = input.prompt;
+    if (!input.promptIsDescription) {
+      const brief = await getAiProvider().chat({
+        model: briefModel,
+        system: price.key === 'chapter_cover' ? CHAPTER_COVER_BRIEF_RULES : IMAGE_BRIEF_RULES,
+        prompt: input.prompt,
+        maxTokens: price.maxOutputTokens,
+        reasoningEffort: input.reasoningEffort,
+        reasoningTokenAllowance: input.reasoningTokenAllowance,
+        userId: input.user.id,
+        signal: input.signal,
+      });
+      calls.push({ attempt: 1, step, model, status: 'succeeded', usage: brief.usage, durationMs: performance.now() - started, providerId: brief.providerId, dataPolicy: brief.dataPolicy });
+      imagePrompt = brief.text.slice(0, price.key === 'chapter_cover' ? 4000 : IMAGE_PROMPT_CHARS);
+    }
 
     started = performance.now();
     step = 'main';
@@ -328,7 +331,7 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
         () =>
           runImage(
             prisma,
-            { user: authedUser, price, textModel: config.textModel, imageModel: config.imageModel, reasoningEffort: config.reasoningEffort, reasoningTokenAllowance: config.reasoningTokenAllowance, imageQuality: config.imageQuality, actionId: body.actionId, prompt: body.prompt, referenceImageUrls: body.referenceImageUrls, signal: request.signal },
+            { user: authedUser, price, textModel: config.textModel, imageModel: config.imageModel, reasoningEffort: config.reasoningEffort, reasoningTokenAllowance: config.reasoningTokenAllowance, imageQuality: config.imageQuality, actionId: body.actionId, prompt: body.prompt, promptIsDescription: body.promptIsDescription, referenceImageUrls: body.referenceImageUrls, signal: request.signal },
             started.balance,
             started.lensesCharged,
           ),
@@ -338,6 +341,7 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
       body: t.Object({
         actionId: t.String({ format: 'uuid' }),
         feature: t.Union([t.Literal('character_image'), t.Literal('chapter_cover')]),
+        promptIsDescription: t.Optional(t.Boolean()),
         referenceImageUrls: t.Optional(t.Array(t.String({ pattern: '^https?://[^\\s]+$', maxLength: 2048 }), { maxItems: 8 })),
         prompt: t.String({ minLength: 1, maxLength: 400_000 }),
       }),
