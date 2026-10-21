@@ -11,7 +11,7 @@ export function parseStoredContext(value: unknown): ChapterContext | null {
   return parsed.success ? parsed.data : null;
 }
 export async function inactiveEntities(
-  db: PrismaClient,
+  db: Pick<PrismaClient, '$queryRaw'>,
   novelId: string,
   chapterNumber: number,
 ): Promise<InactiveEntity[]> {

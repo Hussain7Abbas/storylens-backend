@@ -7,7 +7,7 @@ const ids = { users: [] as string[], novels: [] as string[] };
 let reader: Actor, other: Actor, guest: Actor, moderator: Actor;
 let novelId: string;
 const files: string[] = [];
-type Cover = { image: { id: string; url: string } | null; generating: boolean; imagePrompt: string | null; promptUpdatedAt: string | null; canEditPrompt: boolean; token?: string | null };
+type Cover = { image: { id: string; url: string } | null; generating: boolean; imagePrompt: string | null; promptUpdatedAt: string | null; canEditPrompt: boolean; canRestart: boolean; token?: string | null };
 const path = (chapter = 5) => `/chapter-covers/${novelId}/${chapter}`;
 beforeAll(async () => {
   if (process.env.STORYLENS_LIVE_DB_TEST !== '1') return;
@@ -60,6 +60,53 @@ live('cancelled and expired reservations can be reclaimed without late writes re
   expect((await call(other, 'PUT', path(6), { token: second.body.token, imageId: image.id })).status).toBe(409);
   expect((await call(reader, 'GET', path(-1))).status).toBe(422);
   expect((await call(reader, 'GET', path(1.5))).status).toBe(422);
+});
+
+live('a refreshed reader can restart their reservation without allowing stale or foreign attempts to take over', async () => {
+  const url = `/chapter-artwork/${novelId}/23`;
+  const first = await call<Cover>(reader, 'POST', `${url}/claim`);
+  const refreshed = await call<Cover>(reader, 'GET', url);
+  expect(refreshed.body).toMatchObject({ generating: true, canRestart: true });
+  expect(refreshed.body).not.toHaveProperty('token');
+  expect(refreshed.body).not.toHaveProperty('coverLeaseToken');
+  // Old clients and ordinary claims keep the original single-reservation behavior.
+  expect((await call<Cover>(reader, 'POST', `${url}/claim`)).body.token).toBeNull();
+  const restart = { restartIfUpdatedAt: refreshed.body.promptUpdatedAt };
+  for (const actor of [other, moderator, guest]) {
+    expect((await call<Cover>(actor, 'GET', url)).body.canRestart).toBe(false);
+    const denied = await call<Cover>(actor, 'POST', `${url}/claim`, restart);
+    expect(denied.body.token).toBeFalsy();
+  }
+  const attempts = await Promise.all([1, 2].map(() => call<Cover>(reader, 'POST', `${url}/claim`, restart)));
+  expect(attempts.filter(result => result.body.token)).toHaveLength(1);
+  const next = attempts.find(result => result.body.token)?.body;
+  expect(next?.token).toBeString();
+  expect(next?.token).not.toBe(first.body.token);
+  expect(next?.promptUpdatedAt).not.toBe(refreshed.body.promptUpdatedAt);
+  await call(reader, 'DELETE', `${url}/claim`, { token: first.body.token });
+  expect((await call<Cover>(reader, 'GET', url)).body.generating).toBe(true);
+  const staleImage = await imageFor(reader);
+  expect((await call(reader, 'PUT', url, { token: first.body.token, imageId: staleImage.id })).status).toBe(409);
+  expect((await call<Cover>(reader, 'POST', `${url}/claim`, restart)).body.token).toBeNull();
+  const image = await imageFor(reader);
+  expect((await call(reader, 'PUT', url, { token: next?.token, imageId: image.id })).status).toBe(200);
+  expect((await call<Cover>(reader, 'GET', url)).body).toMatchObject({ generating: false, canRestart: false, image: { id: image.id } });
+});
+
+live('restarting an interrupted replacement retains the published image and prompt', async () => {
+  const url = path(24);
+  const first = await call<Cover>(reader, 'POST', `${url}/claim`);
+  const image = await imageFor(reader);
+  await call(reader, 'PUT', url, { token: first.body.token, imageId: image.id, imagePrompt: 'A red moon above the bridge.' });
+  const replacing = await call<Cover>(reader, 'POST', `${url}/claim`, { regenerate: true });
+  const restarted = await call<Cover>(reader, 'POST', `${url}/claim`, { restartIfUpdatedAt: replacing.body.promptUpdatedAt });
+  expect(restarted.body.token).toBeString();
+  expect(restarted.body.token).not.toBe(replacing.body.token);
+  expect(restarted.body).toMatchObject({ generating: true, imagePrompt: 'A red moon above the bridge.', image: { id: image.id } });
+  await call(reader, 'DELETE', `${url}/claim`, { token: replacing.body.token });
+  const replacement = await imageFor(reader);
+  expect((await call(reader, 'PUT', url, { token: replacing.body.token, imageId: replacement.id })).status).toBe(409);
+  expect((await call(reader, 'PUT', url, { token: restarted.body.token, imageId: replacement.id })).status).toBe(200);
 });
 
 

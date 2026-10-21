@@ -5,6 +5,7 @@ import { authorize } from '@/middleware/authorize';
 import { HttpError } from '@/utils/errors';
 import { bulkContexts, contextTracking } from '@/lib/chapter-context/tracking';
 import { chapterContextSchema } from '@/lib/chapter-context/schema';
+import { editContextProperty } from '@/lib/chapter-context/edit';
 import {
   inactiveEntities,
   imageContinuity,
@@ -30,7 +31,7 @@ export const chapterContexts = new Elysia({
   .use(authorize('user'))
   .get(
     '/:novelId/:chapterNumber',
-    async ({ prisma, params, query }) => {
+    async ({ prisma, params, query, authedUser }) => {
       const row = await prisma.chapter.findUnique({
         where: {
           novelId_number: {
@@ -44,9 +45,16 @@ export const chapterContexts = new Elysia({
         params.novelId,
         params.chapterNumber,
       );
+      const context = parseStoredContext(row?.context);
       return {
-        context: parseStoredContext(row?.context),
+        context,
         contentHash: row?.contextHash ?? null,
+        updatedAt: row?.updatedAt ?? null,
+        canEdit:
+          !authedUser.isGuest &&
+          authedUser.permissions.includes('PATCH /api/user/chapter-context/:novelId/:chapterNumber') &&
+          !!context &&
+          (row?.contextCreatedById === authedUser.id || canModerate(authedUser)),
         generating:
           !!row?.contextLeaseExpiresAt &&
           row.contextLeaseExpiresAt.getTime() > Date.now(),
@@ -70,6 +78,26 @@ export const chapterContexts = new Elysia({
         summary:
           'Read this chapter context and recently absent entities; never neighboring contexts',
       },
+    },
+  )
+  .patch(
+    '/:novelId/:chapterNumber',
+    ({ prisma, params, authedUser, body }) => editContextProperty(prisma, params, authedUser, body),
+    {
+      params,
+      body: t.Object({
+        baseUpdatedAt: t.String({ format: 'date-time' }),
+        path: t.Array(
+          t.Union([
+            t.String({ minLength: 1, maxLength: 80 }),
+            t.Integer({ minimum: 0, maximum: 2147483647 }),
+          ]),
+          { minItems: 1, maxItems: 12 },
+        ),
+        value: t.Unknown(),
+      }),
+      response: t.Unknown(),
+      detail: { summary: 'Manually edit one chapter context property and refresh its continuity index' },
     },
   )
   .get(
@@ -273,6 +301,7 @@ export const chapterContexts = new Elysia({
           message: 'Context entities must belong to this novel',
         });
       await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(20261017, hashtext(${`${params.novelId}:${params.chapterNumber}`}))`;
         const where = { novelId: params.novelId, number: params.chapterNumber };
         const row = await tx.chapter.findUnique({
           where: { novelId_number: where },

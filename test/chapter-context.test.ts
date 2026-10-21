@@ -79,17 +79,18 @@ describe('structured chapter context', () => {
 });
 const marker = `context-${crypto.randomUUID().slice(0, 8)}`;
 const ids = { users: [] as string[], novels: [] as string[] };
-let reader: Actor, other: Actor, guest: Actor, novelId: string;
+let reader: Actor, other: Actor, guest: Actor, moderator: Actor, novelId: string;
 const path = (chapter: number) => `/chapter-context/${novelId}/${chapter}`;
 const hash = (chapter: number) => chapter.toString(16).padStart(64, '0');
 beforeAll(async () => {
   if (process.env.STORYLENS_LIVE_DB_TEST !== '1') return;
-  [reader, other, guest] = await Promise.all([
+  [reader, other, guest, moderator] = await Promise.all([
     makeActor('reader', marker),
     makeActor('reader', marker),
     makeActor('guest', marker),
+    makeActor('moderator', marker),
   ]);
-  ids.users.push(reader.id, other.id, guest.id);
+  ids.users.push(reader.id, other.id, guest.id, moderator.id);
   novelId = (await prisma.novel.create({ data: { nameEn: marker, slugs: [marker] } })).id;
   ids.novels.push(novelId);
 });
@@ -145,10 +146,12 @@ live(
     expect(read.status).toBe(200);
     expect(read.body.context.summary).toBe('Summary of chapter 8');
     expect(Object.keys(read.body).sort()).toEqual([
+      'canEdit',
       'contentHash',
       'context',
       'generating',
       'inactiveEntities',
+      'updatedAt',
     ]);
     const novel = await call<{ chapters: Record<string, unknown>[] }>(
       guest,
@@ -324,4 +327,57 @@ live('compact tracking uses one nearest previous chapter, bulk restores returnin
  expect((await call<{chapters: unknown[]}>(guest, 'POST', `${path(104)}/bulk`, {chapterNumbers: []})).body.chapters).toEqual([]);
  const isolated = await call<typeof tracking.body>(guest, 'POST', `/chapter-context/${crypto.randomUUID()}/104/tracking`, {entityKeys: ['name:mira']});
  expect(isolated.body).toEqual({previous: null, lastSeen: []});
+});
+
+type EditableContext = { context: ChapterContext; updatedAt: string; canEdit: boolean; generating: boolean; contentHash: string };
+live('manual context edits enforce ownership and revision checks and rebuild continuity facts atomically', async () => {
+  const chapter = 501;
+  await publish(chapter, sampleContext(chapter, 'Wounded'));
+  const initial = (await call<EditableContext>(reader, 'GET', path(chapter))).body;
+  expect(initial.canEdit).toBe(true);
+  expect((await call<EditableContext>(other, 'GET', path(chapter))).body.canEdit).toBe(false);
+  expect((await call<EditableContext>(guest, 'GET', path(chapter))).body.canEdit).toBe(false);
+  const edit = { baseUpdatedAt: initial.updatedAt, path: ['scenes', 0, 'entities', 0, 'name'], value: 'Mira the scout' };
+  expect((await call(other, 'PATCH', path(chapter), edit)).status).toBe(403);
+  expect((await call(guest, 'PATCH', path(chapter), edit)).status).toBe(403);
+  const renamed = await call<EditableContext>(reader, 'PATCH', path(chapter), edit);
+  expect(renamed.status).toBe(200);
+  expect(renamed.body.context.scenes[0]?.entities[0]?.name).toBe('Mira the scout');
+  expect(renamed.body.updatedAt).not.toBe(initial.updatedAt);
+  expect(renamed.body.contentHash).toBe(initial.contentHash);
+  expect(renamed.body).not.toHaveProperty('contextLeaseToken');
+  const mention = await prisma.chapterMention.findFirstOrThrow({ where: { novelId, chapterNumber: chapter } });
+  expect(mention.name).toBe('Mira the scout');
+  const cleared = await call<EditableContext>(reader, 'PATCH', path(chapter), { baseUpdatedAt: renamed.body.updatedAt, path: ['stateChanges', 0, 'value'], value: null });
+  expect(cleared.status).toBe(200);
+  expect((await prisma.chapterMention.findFirstOrThrow({ where: { novelId, chapterNumber: chapter } })).state).toMatchObject({ 'injuries.leftShoulder': { value: null } });
+  const updates = await Promise.all(['First edit', 'Second edit'].map(value => call<EditableContext>(reader, 'PATCH', path(chapter), { baseUpdatedAt: cleared.body.updatedAt, path: ['summary'], value })));
+  expect(updates.map(result => result.status).sort()).toEqual([200, 409]);
+  expect((await call(reader, 'PATCH', path(chapter), edit)).status).toBe(409);
+  const latest = (await call<EditableContext>(moderator, 'GET', path(chapter))).body;
+  expect(latest.canEdit).toBe(true);
+  expect((await call(moderator, 'PATCH', path(chapter), { baseUpdatedAt: latest.updatedAt, path: ['summary'], value: 'Moderator correction' })).status).toBe(200);
+});
+
+live('manual edits validate JSON paths, schema, novel identities and active generation without damaging the saved context', async () => {
+  const chapter = 502;
+  await publish(chapter);
+  const initial = (await call<EditableContext>(reader, 'GET', path(chapter))).body;
+  const patch = (property: (string | number)[], value: unknown) => call(reader, 'PATCH', path(chapter), { baseUpdatedAt: initial.updatedAt, path: property, value });
+  expect((await patch(['summary'], '')).status).toBe(422);
+  expect((await patch(['summary'], '<b>plain text</b>')).status).toBe(200);
+  const fresh = (await call<EditableContext>(reader, 'GET', path(chapter))).body;
+  const request = (property: (string | number)[], value: unknown) => call(reader, 'PATCH', path(chapter), { baseUpdatedAt: fresh.updatedAt, path: property, value });
+  for (const invalid of [['__proto__'], ['scenes', 'length'], ['scenes', 99], ['missing'], []] as (string | number)[][])
+    expect((await request(invalid, 'bad')).status).toBe(422);
+  expect((await request(['scenes', 0, 'entities', 0, 'equipment'], 'not an array')).status).toBe(422);
+  expect((await request(['stateChanges'], [{ entityKey: 'name:mira', sceneId: 'missing', field: 'condition', value: 'Healed', evidence: 'Healed.' }])).status).toBe(422);
+  const invalidIdentity = structuredClone(fresh.context.scenes[0]?.entities[0]);
+  if (!invalidIdentity) throw new Error('Missing fixture entity');
+  invalidIdentity.keywordId = crypto.randomUUID(); invalidIdentity.entityKey = `keyword:${invalidIdentity.keywordId}`;
+  expect((await request(['scenes', 0, 'entities', 0], invalidIdentity)).status).toBe(422);
+  expect((await call<EditableContext>(reader, 'GET', path(chapter))).body.context).toEqual(fresh.context);
+  await call(reader, 'POST', `${path(chapter)}/claim`, { contentHash: hash(chapter), language: 'en', regenerate: true });
+  expect((await request(['summary'], 'During generation')).status).toBe(409);
+  expect((await call(reader, 'PATCH', path(599), { baseUpdatedAt: fresh.updatedAt, path: ['summary'], value: 'Missing' })).status).toBe(404);
 });
