@@ -7,7 +7,7 @@ const params = t.Object({ novelId: t.String({ format: 'uuid' }), chapterNumber: 
 const LEASE_MS = 30 * 60_000;
 const coverResponse = t.Object({
   image: t.Nullable(t.Object({ id: t.String(), url: t.String() })), generating: t.Boolean(),
-  imagePrompt: t.Nullable(t.String()), promptUpdatedAt: t.Nullable(t.Date()), canEditPrompt: t.Boolean(),
+  imagePrompt: t.Nullable(t.String()), promptUpdatedAt: t.Nullable(t.Date()), canEditPrompt: t.Boolean(), canRestart: t.Boolean(),
 });
 const coverSelect = { id: true, image: { select: { id: true, url: true } }, imageId: true, imagePrompt: true, updatedAt: true, coverCreatedById: true, coverLeaseToken: true, coverLeaseExpiresAt: true } as const;
 type CoverRow = { id: string; image: { id: string; url: string } | null; imageId: string | null; imagePrompt: string | null; updatedAt: Date; coverCreatedById: string | null; coverLeaseToken: string | null; coverLeaseExpiresAt: Date | null };
@@ -16,12 +16,14 @@ const claimResponse = t.Composite([coverResponse, t.Object({ token: t.Nullable(t
 
 /** Artwork descriptions are shared; lease tokens and source chapter text stay private. */
 function publicCover(row: CoverRow | null, user: CoverActor) {
+  const generating = !!row?.coverLeaseExpiresAt && row.coverLeaseExpiresAt.getTime() > Date.now();
   return {
     image: row?.image ?? null,
     imagePrompt: row?.imagePrompt ?? null,
     promptUpdatedAt: row?.updatedAt ?? null,
     canEditPrompt: !user.isGuest && !!row && (row.coverCreatedById === user.id || canModerate(user)),
-    generating: !!row?.coverLeaseExpiresAt && row.coverLeaseExpiresAt.getTime() > Date.now(),
+    generating,
+    canRestart: generating && !user.isGuest && row?.coverCreatedById === user.id,
   };
 }
 
@@ -42,7 +44,9 @@ export function coverRoutes(prefix: string) {
       const where = { novelId_number: { novelId: params.novelId, number: params.chapterNumber } };
       const row = await tx.chapter.findUnique({ where, select: coverSelect });
       const cover = publicCover(row, authedUser);
-      if (cover.generating || (cover.image && !body?.regenerate)) return { ...cover, token: null };
+      // Restart only the caller's observed reservation. A stale tab cannot replace a newer attempt.
+      const restart = cover.canRestart && body?.restartIfUpdatedAt === row?.updatedAt.toISOString();
+      if ((cover.generating && !restart) || (cover.image && !body?.regenerate && !restart)) return { ...cover, token: null };
       if (cover.image && row?.coverCreatedById !== authedUser.id && !canModerate(authedUser))
         throw new HttpError({ statusCode: 403, message: 'Only the cover publisher or a moderator can regenerate this cover' });
       const token = crypto.randomUUID();
@@ -50,7 +54,7 @@ export function coverRoutes(prefix: string) {
       const claimed = await tx.chapter.upsert({ where, create: { novelId: params.novelId, number: params.chapterNumber, ...data }, update: data, select: coverSelect });
       return { ...publicCover(claimed, authedUser), token };
     });
-  }, { ...compatibility, params, body: t.Optional(t.Object({ regenerate: t.Optional(t.Boolean()) })), response: { 200: claimResponse }, detail: { summary: 'Reserve generation or regeneration of a shared chapter cover' } })
+  }, { ...compatibility, params, body: t.Optional(t.Object({ regenerate: t.Optional(t.Boolean()), restartIfUpdatedAt: t.Optional(t.String({ format: 'date-time' })) })), response: { 200: claimResponse }, detail: { summary: 'Reserve generation or regeneration of a shared chapter cover' } })
   .put('/:novelId/:chapterNumber', async ({ prisma, authedUser, params, body }) => {
     return prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(20261016, hashtext(${`${params.novelId}:${params.chapterNumber}`}))`;

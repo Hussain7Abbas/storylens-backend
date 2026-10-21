@@ -154,6 +154,7 @@ export const USER_ENDPOINT_DESCRIPTIONS: Record<string, string> = {
   'DELETE /api/user/novels/:id': 'Delete a novel',
   'GET /api/user/chapters/novel/:novelId': 'List a novel’s chapters',
   'GET /api/user/chapter-context/:novelId/:chapterNumber': 'Read chapter context',
+  'PATCH /api/user/chapter-context/:novelId/:chapterNumber': 'Edit your chapter context properties',
   'GET /api/user/chapter-context/:novelId/:chapterNumber/continuity': 'Load image continuity context',
   'POST /api/user/chapter-context/:novelId/:chapterNumber/tracking': 'Read previous context and returning element pointers',
   'POST /api/user/chapter-context/:novelId/:chapterNumber/bulk': 'Read earlier chapter contexts in bulk',
