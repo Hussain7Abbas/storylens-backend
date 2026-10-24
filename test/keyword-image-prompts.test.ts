@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db';
 import { app } from '@/server';
 import { call, cleanup, live, makeActor, makeStyles } from './helpers/live-db';
 
-type Styled = { id: string; imagePrompt: string | null; updatedAt: string };
+type Styled = { id: string; imagePrompt?: string | null; imageDescription: string | null; updatedAt: string };
 type Keyword = { id: string; versions: Styled[] };
 
 live('image prompts survive reader/admin saves, partial edits, replay, and explicit clears', async () => {
@@ -16,18 +16,20 @@ live('image prompts survive reader/admin saves, partial edits, replay, and expli
   const body = {
     id: crypto.randomUUID(), versionId: crypto.randomUUID(), novelId: novel.id,
     nameEn: `Mira ${marker}`, categoryId: styles.category.id, natureId: styles.nature.id,
-    imagePrompt: prompt,
+    imageDescription: prompt,
   };
   try {
     const created = await call<Keyword>(actor, 'POST', '/keywords', body);
     expect(created.status).toBe(200);
-    expect(created.body.versions[0]?.imagePrompt).toBe(prompt);
-    expect((await call<Keyword>(actor, 'POST', '/keywords', { ...body, imagePrompt: 'Ignored replay' })).body).toEqual(created.body);
+    expect(created.body.versions[0]?.imageDescription).toBe(prompt);
+    expect((await call<Keyword>(actor, 'POST', '/keywords', { ...body, imageDescription: 'Ignored replay' })).body).toEqual(created.body);
     const alias = await call<Styled>(actor, 'POST', '/keyword-aliases', {
       id: crypto.randomUUID(), keywordId: body.id, nameEn: `Scout ${marker}`, imagePrompt: prompt,
     });
+    expect(alias.body.imageDescription).toBe(prompt);
+    expect(alias.body.imagePrompt).toBe(prompt);
     const version = await call<Styled>(actor, 'POST', '/keyword-versions', {
-      id: crypto.randomUUID(), keywordId: body.id, currentChapter: 10, imagePrompt: prompt,
+      id: crypto.randomUUID(), keywordId: body.id, currentChapter: 10, imageDescription: prompt,
     });
     expect(alias.status).toBe(200);
     expect(version.status).toBe(200);
@@ -36,21 +38,21 @@ live('image prompts survive reader/admin saves, partial edits, replay, and expli
       ['keyword-versions', { ...base, updatedAt: base.updatedAt.toISOString() }],
       ['keyword-aliases', alias.body], ['keyword-versions', version.body],
     ] as const) {
-      expect(row.imagePrompt).toBe(prompt);
+      expect(row.imageDescription).toBe(prompt);
       const edit = await call<Styled>(actor, 'PUT', `/${route}/${row.id}`, {
-        baseUpdatedAt: row.updatedAt, imagePrompt: `${prompt}\nRed cloak instead.`,
+        baseUpdatedAt: row.updatedAt, imageDescription: `${prompt}\nRed cloak instead.`,
       });
       expect(edit.status).toBe(200);
       const partial = await call<Styled>(actor, 'PUT', `/${route}/${row.id}`, {
         baseUpdatedAt: edit.body.updatedAt, descriptionEn: 'Updated description',
       });
       expect(partial.status).toBe(200);
-      expect(partial.body.imagePrompt).toBe(`${prompt}\nRed cloak instead.`);
+      expect(partial.body.imageDescription).toBe(`${prompt}\nRed cloak instead.`);
       const clear = await call<Styled>(actor, 'PUT', `/${route}/${row.id}`, {
-        baseUpdatedAt: partial.body.updatedAt, imagePrompt: null,
+        baseUpdatedAt: partial.body.updatedAt, imageDescription: null,
       });
       expect(clear.status).toBe(200);
-      expect(clear.body.imagePrompt).toBeNull();
+      expect(clear.body.imageDescription).toBeNull();
     }
     const role = await prisma.role.findUniqueOrThrow({ where: { slug: 'super-admin' } });
     await prisma.user.update({ where: { id: actor.id }, data: { isAdmin: true, adminRoleId: role.id } });
@@ -63,19 +65,19 @@ live('image prompts survive reader/admin saves, partial edits, replay, and expli
       expect(response.status).toBe(200);
       return response.json() as Promise<T>;
     };
-    const adminKeyword = await admin<Keyword>('POST', '/keywords', { novelId: novel.id, nameEn: `Admin ${marker}`, imagePrompt: prompt });
-    expect(adminKeyword.versions[0]?.imagePrompt).toBe(prompt);
-    const adminAlias = await admin<Styled>('POST', '/keyword-aliases', { keywordId: adminKeyword.id, nameEn: 'Alias', imagePrompt: prompt });
-    const adminVersion = await admin<Styled>('POST', '/keyword-versions', { keywordId: adminKeyword.id, startingChapter: 10, imagePrompt: prompt });
+    const adminKeyword = await admin<Keyword>('POST', '/keywords', { novelId: novel.id, nameEn: `Admin ${marker}`, imageDescription: prompt });
+    expect(adminKeyword.versions[0]?.imageDescription).toBe(prompt);
+    const adminAlias = await admin<Styled>('POST', '/keyword-aliases', { keywordId: adminKeyword.id, nameEn: 'Alias', imageDescription: prompt });
+    const adminVersion = await admin<Styled>('POST', '/keyword-versions', { keywordId: adminKeyword.id, startingChapter: 10, imageDescription: prompt });
     for (const [route, row] of [['keyword-aliases', adminAlias], ['keyword-versions', adminVersion]] as const) {
-      expect(row.imagePrompt).toBe(prompt);
-      expect((await admin<Styled>('PUT', `/${route}/${row.id}`, { descriptionEn: 'Partial' })).imagePrompt).toBe(prompt);
-      expect((await admin<Styled>('PUT', `/${route}/${row.id}`, { imagePrompt: null })).imagePrompt).toBeNull();
+      expect(row.imageDescription).toBe(prompt);
+      expect((await admin<Styled>('PUT', `/${route}/${row.id}`, { descriptionEn: 'Partial' })).imageDescription).toBe(prompt);
+      expect((await admin<Styled>('PUT', `/${route}/${row.id}`, { imageDescription: null })).imageDescription).toBeNull();
     }
     const oldClient = await admin<Keyword>('POST', '/keywords', { novelId: novel.id, nameEn: `Legacy ${marker}` });
-    expect(oldClient.versions[0]?.imagePrompt).toBeNull();
+    expect(oldClient.versions[0]?.imageDescription).toBeNull();
     const profile = await admin<{ data: Keyword[] }>('GET', `/novels/${novel.id}/keywords`);
-    expect(profile.data.find((item) => item.id === adminKeyword.id)?.versions[0]?.imagePrompt).toBe(prompt);
+    expect(profile.data.find((item) => item.id === adminKeyword.id)?.versions[0]?.imageDescription).toBe(prompt);
   } finally {
     await cleanup({ novels: [novel.id], users: [actor.id], categories: [styles.category.id], natures: [styles.nature.id] });
   }

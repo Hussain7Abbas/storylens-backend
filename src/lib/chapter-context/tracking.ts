@@ -24,10 +24,14 @@ export async function contextTracking(
   });
   const context = parseStoredContext(row?.context);
   const lastSeen = await db.$queryRaw<EntityLastSeen[]>`
-  SELECT DISTINCT ON ("entityKey") "entityKey", "name", "keywordId", "chapterNumber" AS "lastSeenChapter"
-  FROM "ChapterMention" WHERE "novelId"=${novelId} AND "chapterNumber"<${chapterNumber}
-   AND ("keywordId" IS NULL OR "entityKey" IN (${Prisma.join(entityKeys.length ? entityKeys : [''])}))
-  ORDER BY "entityKey", "chapterNumber" DESC LIMIT 4000`;
+  SELECT * FROM (
+    SELECT DISTINCT ON ("entityKey") "entityKey", "name", "keywordId", "chapterNumber" AS "lastSeenChapter"
+    FROM "ChapterMention" WHERE "novelId"=${novelId} AND "chapterNumber"<${chapterNumber}
+     AND ("keywordId" IS NULL OR "entityKey" IN (${Prisma.join(entityKeys.length ? entityKeys : [''])}))
+    ORDER BY "entityKey", "chapterNumber" DESC
+  ) latest
+  ORDER BY ("entityKey" IN (${Prisma.join(entityKeys.length ? entityKeys : [''])})) DESC,
+    "lastSeenChapter" DESC, "entityKey" ASC LIMIT 4000`;
   return {
     previous: row && context ? { chapterNumber: row.number, context } : null,
     lastSeen,

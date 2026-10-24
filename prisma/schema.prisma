@@ -302,6 +302,8 @@ model Chapter {
   contextLeaseHash String?
   imageId String?
   image File? @relation("ChapterArtwork", fields: [imageId], references: [id], onDelete: SetNull)
+  imageDescription String?
+  /// @deprecated use imageDescription. remove-after: 2027-04-30
   imagePrompt String? @db.Text
   coverCreatedById String?
   coverCreatedBy User? @relation("ChapterArtworkCreator", fields: [coverCreatedById], references: [id], onDelete: SetNull)
@@ -449,6 +451,8 @@ model KeywordAlias {
   natureId String?
   nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordAliasNatures")
 
+  imageDescription String?
+  /// @deprecated use imageDescription. remove-after: 2027-04-30
   imagePrompt String?
   imageId String?
   image   File?   @relation(fields: [imageId], references: [id], name: "KeywordAliasImages")
@@ -482,6 +486,8 @@ model KeywordVersion {
   natureId String?
   nature   KeywordNature? @relation(fields: [natureId], references: [id], name: "KeywordVersionNatures")
 
+  imageDescription String?
+  /// @deprecated use imageDescription. remove-after: 2027-04-30
   imagePrompt String?
   imageId String?
   image   File?   @relation(fields: [imageId], references: [id], name: "KeywordVersionImages")

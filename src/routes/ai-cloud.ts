@@ -1,3 +1,4 @@
+import { IMAGE_DESCRIPTION_OUTPUT, parseImageDescription } from '@/lib/ai/image-description';
 import type { ReasoningEffort, ImageQuality } from '@/lib/ai/generation-settings';
 import type { AiFeaturePrice, PrismaClient } from '@prisma/client';
 import { Elysia, t } from 'elysia';
@@ -24,8 +25,6 @@ import { authorize } from '@/middleware/authorize';
 import { setup } from '@/setup';
 import { HttpError } from '@/utils/errors';
 
-/** The brief for the image model is cut here even if the text model writes more. */
-const IMAGE_PROMPT_CHARS = 1_500;
 /** Novel research reads this many web results (Exa, $0.007 a request). */
 const RESEARCH_RESULTS = 5;
 
@@ -160,37 +159,37 @@ async function runImage(
   lensesCharged: number,
 ): Promise<Outcome> {
   const { price } = input;
-  // Saved descriptions go straight to the image model; raw source needs a text brief.
+  // Every image, including regeneration, resolves a validated description first.
   const briefModel = input.textModel;
   const calls: CallRecord[] = [];
   let started = performance.now();
   let step: CallRecord['step'] = 'brief';
   let model = briefModel;
   try {
-    let imagePrompt = input.prompt;
-    if (!input.promptIsDescription) {
-      const brief = await getAiProvider().chat({
-        model: briefModel,
-        system: price.key === 'chapter_cover' ? CHAPTER_COVER_BRIEF_RULES : IMAGE_BRIEF_RULES,
-        prompt: input.prompt,
-        maxTokens: price.maxOutputTokens,
-        reasoningEffort: input.reasoningEffort,
-        reasoningTokenAllowance: input.reasoningTokenAllowance,
-        userId: input.user.id,
-        signal: input.signal,
-      });
-      calls.push({ attempt: 1, step, model, status: 'succeeded', usage: brief.usage, durationMs: performance.now() - started, providerId: brief.providerId, dataPolicy: brief.dataPolicy });
-      imagePrompt = brief.text.slice(0, price.key === 'chapter_cover' ? 4000 : IMAGE_PROMPT_CHARS);
-    }
+    const availableReferences = input.referenceImageUrls ?? [];
+    const brief = await getAiProvider().chat({
+      model: briefModel,
+      system: `${price.key === 'chapter_cover' ? CHAPTER_COVER_BRIEF_RULES : IMAGE_BRIEF_RULES}\n\n${IMAGE_DESCRIPTION_OUTPUT}`,
+      prompt: JSON.stringify({ source: input.prompt, availableReferenceImageUrls: availableReferences }),
+      maxTokens: price.maxOutputTokens,
+      reasoningEffort: input.reasoningEffort,
+      reasoningTokenAllowance: input.reasoningTokenAllowance,
+      userId: input.user.id,
+      signal: input.signal,
+    });
+    let description: ReturnType<typeof parseImageDescription>;
+    try { description = parseImageDescription(brief.text, availableReferences); }
+    catch { throw new AiProviderError('AI_PROVIDER_FAILED', 'Text AI returned an invalid image description or reference selection.', brief.usage); }
+    calls.push({ attempt: 1, step, model, status: 'succeeded', usage: brief.usage, durationMs: performance.now() - started, providerId: brief.providerId, dataPolicy: brief.dataPolicy });
 
     started = performance.now();
     step = 'main';
     model = input.imageModel;
     const image = await getAiProvider().image({
       model: input.imageModel,
-      prompt: imagePrompt,
+      prompt: description.imageDescription,
       aspectRatio: price.key === 'chapter_cover' ? '16:9' : '1:1',
-      referenceImageUrls: input.referenceImageUrls,
+      referenceImageUrls: description.referenceImageUrls,
       format: 'jpeg',
       quality: input.imageQuality,
       userId: input.user.id,
@@ -206,7 +205,8 @@ async function runImage(
         type: 'result',
         mimeType: image.mimeType,
         data: image.base64,
-        revisedPrompt: imagePrompt,
+        imageDescription: description.imageDescription,
+        revisedPrompt: description.imageDescription,
         model: input.imageModel,
         attempt: 1,
         lensesCharged,

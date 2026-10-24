@@ -1,3 +1,4 @@
+import { imageDescriptionFields } from '@/lib/keywords/image-description';
 import type { Prisma } from '@prisma/client';
 import { t } from 'elysia';
 import { FilePlain, KeywordAliasPlain, KeywordCategoryPlain, KeywordNaturePlain, KeywordPlain, KeywordVersionPlain } from '@/lib/db';
@@ -38,6 +39,6 @@ export const styleBody = {
   descriptionEn: t.Optional(t.Nullable(t.String({ maxLength: 5000 }))),
   categoryId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
   natureId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
-  imagePrompt: t.Optional(t.Nullable(t.String({ maxLength: 180000 }))),
+  ...imageDescriptionFields,
   imageId: t.Optional(t.Nullable(t.String({ format: 'uuid' }))),
 };

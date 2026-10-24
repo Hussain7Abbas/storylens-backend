@@ -7,7 +7,7 @@ const ids = { users: [] as string[], novels: [] as string[] };
 let reader: Actor, other: Actor, guest: Actor, moderator: Actor;
 let novelId: string;
 const files: string[] = [];
-type Cover = { image: { id: string; url: string } | null; generating: boolean; imagePrompt: string | null; promptUpdatedAt: string | null; canEditPrompt: boolean; canRestart: boolean; token?: string | null };
+type Cover = { image: { id: string; url: string } | null; generating: boolean; imageDescription: string | null; promptUpdatedAt: string | null; canEditPrompt: boolean; canRestart: boolean; token?: string | null };
 const path = (chapter = 5) => `/chapter-covers/${novelId}/${chapter}`;
 beforeAll(async () => {
   if (process.env.STORYLENS_LIVE_DB_TEST !== '1') return;
@@ -97,12 +97,12 @@ live('restarting an interrupted replacement retains the published image and prom
   const url = path(24);
   const first = await call<Cover>(reader, 'POST', `${url}/claim`);
   const image = await imageFor(reader);
-  await call(reader, 'PUT', url, { token: first.body.token, imageId: image.id, imagePrompt: 'A red moon above the bridge.' });
+  await call(reader, 'PUT', url, { token: first.body.token, imageId: image.id, imageDescription: 'A red moon above the bridge.' });
   const replacing = await call<Cover>(reader, 'POST', `${url}/claim`, { regenerate: true });
   const restarted = await call<Cover>(reader, 'POST', `${url}/claim`, { restartIfUpdatedAt: replacing.body.promptUpdatedAt });
   expect(restarted.body.token).toBeString();
   expect(restarted.body.token).not.toBe(replacing.body.token);
-  expect(restarted.body).toMatchObject({ generating: true, imagePrompt: 'A red moon above the bridge.', image: { id: image.id } });
+  expect(restarted.body).toMatchObject({ generating: true, imageDescription: 'A red moon above the bridge.', image: { id: image.id } });
   await call(reader, 'DELETE', `${url}/claim`, { token: replacing.body.token });
   const replacement = await imageFor(reader);
   expect((await call(reader, 'PUT', url, { token: replacing.body.token, imageId: replacement.id })).status).toBe(409);
@@ -138,32 +138,32 @@ live('artwork stores the image description, shares it after reload, and protects
   const claim = await call<Cover>(reader, 'POST', `${url}/claim`);
   const image = await imageFor(reader);
   const prompt = 'A scout in blue robes beneath a red moon.';
-  const saved = await call<Cover>(reader, 'PUT', url, { token: claim.body.token, imageId: image.id, imagePrompt: prompt });
+  const saved = await call<Cover>(reader, 'PUT', url, { token: claim.body.token, imageId: image.id, imageDescription: prompt });
   expect(saved.status).toBe(200);
-  expect(saved.body).toMatchObject({ imagePrompt: prompt, canEditPrompt: true, generating: false });
+  expect(saved.body).toMatchObject({ imageDescription: prompt, canEditPrompt: true, generating: false });
   expect(saved.body.promptUpdatedAt).toBeString();
   const publicRead = await call<Cover>(guest, 'GET', url);
-  expect(publicRead.body).toMatchObject({ imagePrompt: prompt, canEditPrompt: false });
+  expect(publicRead.body).toMatchObject({ imageDescription: prompt, canEditPrompt: false });
   expect(publicRead.body).not.toHaveProperty('coverLeaseToken');
   expect(publicRead.body).not.toHaveProperty('context');
-  const edit = { imagePrompt: 'A scout in green robes. <plain text>', baseUpdatedAt: saved.body.promptUpdatedAt };
+  const edit = { imageDescription: 'A scout in green robes. <plain text>', baseUpdatedAt: saved.body.promptUpdatedAt };
   expect((await call(other, 'PUT', `${url}/prompt`, edit)).status).toBe(403);
   expect((await call(guest, 'PUT', `${url}/prompt`, edit)).status).toBe(403);
   const updates = await Promise.all([1, 2].map(() => call<Cover>(reader, 'PUT', `${url}/prompt`, edit)));
   expect(updates.map(result => result.status).sort()).toEqual([200, 409]);
   const updated = await call<Cover>(reader, 'GET', url);
-  expect(updated.body.imagePrompt).toBe(edit.imagePrompt);
+  expect(updated.body.imageDescription).toBe(edit.imageDescription);
   expect(updated.body.image).toEqual(saved.body.image);
   expect(updated.body.promptUpdatedAt).not.toBe(saved.body.promptUpdatedAt);
   // An upload replay must not replace a later prompt edit.
-  await call(reader, 'PUT', url, { token: claim.body.token, imageId: image.id, imagePrompt: prompt });
-  expect((await call<Cover>(reader, 'GET', url)).body.imagePrompt).toBe(edit.imagePrompt);
+  await call(reader, 'PUT', url, { token: claim.body.token, imageId: image.id, imageDescription: prompt });
+  expect((await call<Cover>(reader, 'GET', url)).body.imageDescription).toBe(edit.imageDescription);
   expect((await call<Cover>(moderator, 'GET', url)).body.canEditPrompt).toBe(true);
-  const cleared = await call<Cover>(moderator, 'PUT', `${url}/prompt`, { imagePrompt: '  ', baseUpdatedAt: updated.body.promptUpdatedAt });
+  const cleared = await call<Cover>(moderator, 'PUT', `${url}/prompt`, { imageDescription: '  ', baseUpdatedAt: updated.body.promptUpdatedAt });
   expect(cleared.status).toBe(200);
-  expect(cleared.body.imagePrompt).toBeNull();
-  expect((await call(reader, 'PUT', `${url}/prompt`, { imagePrompt: 'x'.repeat(180001), baseUpdatedAt: cleared.body.promptUpdatedAt })).status).toBe(422);
-  expect((await call(reader, 'PUT', `${url}/prompt`, { imagePrompt: 'new', baseUpdatedAt: 'invalid' })).status).toBe(422);
+  expect(cleared.body.imageDescription).toBeNull();
+  expect((await call(reader, 'PUT', `${url}/prompt`, { imageDescription: 'x'.repeat(180001), baseUpdatedAt: cleared.body.promptUpdatedAt })).status).toBe(422);
+  expect((await call(reader, 'PUT', `${url}/prompt`, { imageDescription: 'new', baseUpdatedAt: 'invalid' })).status).toBe(422);
   expect((await call(reader, 'PUT', `/chapter-artwork/${novelId}/99/prompt`, edit)).status).toBe(404);
 });
 
@@ -171,13 +171,29 @@ live('prompt edits cannot race generation and old clients do not carry a previou
   const url = `/chapter-artwork/${novelId}/22`;
   const first = await call<Cover>(reader, 'POST', `${url}/claim`);
   const image = await imageFor(reader);
-  await call(reader, 'PUT', url, { token: first.body.token, imageId: image.id, imagePrompt: 'The first image.' });
+  await call(reader, 'PUT', url, { token: first.body.token, imageId: image.id, imageDescription: 'The first image.' });
   const replacement = await call<Cover>(reader, 'POST', `${url}/claim`, { regenerate: true });
-  expect(replacement.body.imagePrompt).toBe('The first image.');
-  expect((await call(reader, 'PUT', `${url}/prompt`, { imagePrompt: 'Conflicting edit', baseUpdatedAt: replacement.body.promptUpdatedAt })).status).toBe(409);
+  expect(replacement.body.imageDescription).toBe('The first image.');
+  expect((await call(reader, 'PUT', `${url}/prompt`, { imageDescription: 'Conflicting edit', baseUpdatedAt: replacement.body.promptUpdatedAt })).status).toBe(409);
   const next = await imageFor(reader);
   const legacy = await call<Cover>(reader, 'PUT', url, { token: replacement.body.token, imageId: next.id });
   expect(legacy.status).toBe(200);
-  expect(legacy.body.imagePrompt).toBeNull();
+  expect(legacy.body.imageDescription).toBeNull();
   expect(legacy.body.image?.id).toBe(next.id);
+});
+
+
+live('legacy chapter prompt writes return both spellings and explicit new null wins', async () => {
+  const claim = await call<Cover>(reader, 'POST', `${path(25)}/claim`);
+  const image = await imageFor(reader);
+  const published = await call<Cover & { imagePrompt: string | null }>(reader, 'PUT', path(25), {
+    token: claim.body.token, imageId: image.id, imagePrompt: 'A legacy visual description.',
+  });
+  expect(published.status).toBe(200);
+  expect(published.body).toMatchObject({ imageDescription: 'A legacy visual description.', imagePrompt: 'A legacy visual description.' });
+  const cleared = await call(reader, 'PUT', `/chapter-artwork/${novelId}/25/prompt`, {
+    imageDescription: null, imagePrompt: 'Must not override null', baseUpdatedAt: published.body.promptUpdatedAt,
+  });
+  expect(cleared.status).toBe(200);
+  expect(cleared.body).toMatchObject({ imageDescription: null, imagePrompt: null });
 });
