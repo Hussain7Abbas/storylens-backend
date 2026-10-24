@@ -30,7 +30,7 @@ export function fakeAi() {
     async chat(input) {
       chats.push(input);
       const step = await next(input.signal);
-      const text = step.kind === 'ok' || step.kind === 'policy-fallback' ? (step.text ?? 'fake answer') : '';
+      const text = step.kind === 'ok' || step.kind === 'policy-fallback' ? (step.text ?? (input.system.includes('referenceImageUrls') ? JSON.stringify({ imageDescription: 'A silver-cloaked scout on a moonlit bridge.', referenceImageUrls: [] }) : 'fake answer')) : '';
       return {
         text,
         usage: { inputTokens: 100, outputTokens: 20, costUsd: step.kind === 'ok' ? (step.costUsd ?? 0.001) : 0.001 },

@@ -1,3 +1,4 @@
+import { imageDescriptionFields, imageDescriptionValue } from '@/lib/keywords/image-description';
 import { descriptionData } from '@/lib/keywords/descriptions';
 import { Elysia, t } from "elysia";
 import { FilePlain, KeywordCategoryPlain, KeywordNaturePlain, KeywordVersionPlain } from "@/lib/db";
@@ -152,7 +153,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 								...descriptionData(sanitizedBody, lang),
 								categoryId,
 								natureId,
-								imagePrompt: sanitizedBody.imagePrompt ?? null,
+								imageDescription: imageDescriptionValue(sanitizedBody) ?? null,
 								imageId: sanitizedBody.imageId ?? null,
 								keywordId,
 								startingChapter,
@@ -176,7 +177,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				description: t.Optional(t.Nullable(t.String())),
 				descriptionAr: t.Optional(t.Nullable(t.String())),
 				descriptionEn: t.Optional(t.Nullable(t.String())),
-				imagePrompt: t.Optional(t.Nullable(t.String({ maxLength: 180000 }))),
+				...imageDescriptionFields,
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				currentChapter: t.Optional(t.Number({ minimum: 0 })),
 				startingChapter: t.Optional(t.Number({ minimum: 0 })),
@@ -226,7 +227,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				...descriptionData(sanitizedBody, lang),
 				categoryId: sanitizedBody.categoryId,
 				natureId: sanitizedBody.natureId,
-				imagePrompt: sanitizedBody.imagePrompt,
+				imageDescription: imageDescriptionValue(sanitizedBody),
 				imageId: sanitizedBody.imageId,
 			};
 
@@ -250,7 +251,7 @@ export const keywordVersions = new Elysia({ prefix: "/keyword-versions", tags: [
 				descriptionEn: t.Optional(t.Nullable(t.String())),
 				categoryId: t.Optional(t.String({ format: "uuid" })),
 				natureId: t.Optional(t.String({ format: "uuid" })),
-				imagePrompt: t.Optional(t.Nullable(t.String({ maxLength: 180000 }))),
+				...imageDescriptionFields,
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				startingChapter: t.Optional(t.Number({ minimum: 0 })),
 				endingChapter: t.Optional(t.Nullable(t.Number({ minimum: 0 }))),

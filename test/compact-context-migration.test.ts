@@ -31,6 +31,13 @@ test('context migration seeds the compact visual default and Cloud enforces visu
   );
   expect(systemRules('chapter_context', 'en')).toContain('60,000 characters');
   expect(systemRules('page_summary', 'en')).not.toContain('60,000 characters');
+  const rules = systemRules('chapter_context', 'en');
+  expect(rules).toContain('current-scene observations');
+  expect(rules).toContain('latest applicable earlier observation');
+  expect(rules).toContain('a chapter boundary alone does not reset equipment');
+  expect(rules).toContain('A helmet worn only for battle must not automatically remain worn');
+  expect(rules).toContain('Unknown is not an explicit null clear');
+  expect(systemRules('page_summary', 'en')).not.toContain('equipment scope');
 });
 
 live(

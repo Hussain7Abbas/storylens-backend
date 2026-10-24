@@ -1,3 +1,4 @@
+import { imageDescriptionFields, imageDescriptionValue } from '@/lib/keywords/image-description';
 import { mainThemeColorSchema } from '@/schemas/main-theme-color';
 import { chapterPublicSelect } from '@/lib/chapter-context/public';
 import { descriptionData } from '@/lib/keywords/descriptions';
@@ -315,7 +316,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 								...descriptionData(sanitizedBody, lang),
 								categoryId,
 								natureId,
-								imagePrompt: sanitizedBody.imagePrompt ?? null,
+								imageDescription: imageDescriptionValue(sanitizedBody) ?? null,
 								imageId: sanitizedBody.imageId ?? null,
 								keywordId: kw.id,
 								startingChapter,
@@ -368,7 +369,7 @@ export const keywords = new Elysia({ prefix: "/keywords", tags: ["Keywords"] })
 				novelId: t.String({ format: "uuid" }),
 				categoryId: t.String({ format: "uuid" }),
 				natureId: t.String({ format: "uuid" }),
-				imagePrompt: t.Optional(t.Nullable(t.String({ maxLength: 180000 }))),
+				...imageDescriptionFields,
 				imageId: t.Optional(t.Nullable(t.String({ format: "uuid" }))),
 				// Translation link: the keyword that holds this one's other-language name.
 				// It is merged into the new keyword and deleted (see `mergeTranslationKeyword`).

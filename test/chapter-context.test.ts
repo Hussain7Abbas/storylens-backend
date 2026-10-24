@@ -301,6 +301,9 @@ live('compact tracking uses one nearest previous chapter, bulk restores returnin
  const tracking = await call<{previous: {chapterNumber: number; context: ChapterContext} | null; lastSeen: {entityKey: string; lastSeenChapter: number}[]}>(guest, 'POST', `${path(104)}/tracking`, {entityKeys: ['name:mira']});
  expect(tracking.status).toBe(200);
  expect(tracking.body.previous?.chapterNumber).toBe(102);
+ expect(tracking.body.lastSeen[0]?.entityKey).toBe('name:mira');
+ const recent = await call<typeof tracking.body>(guest, 'POST', `${path(104)}/tracking`, {entityKeys: []});
+ expect(recent.body.lastSeen.filter(entity => ['name:leo', 'name:mira'].includes(entity.entityKey)).map(entity => entity.entityKey)).toEqual(['name:leo', 'name:mira']);
  expect(tracking.body.lastSeen.find(entity => entity.entityKey === 'name:mira')?.lastSeenChapter).toBe(100);
  expect(JSON.stringify(tracking.body)).not.toContain('missingChapters');
  expect(JSON.stringify(tracking.body)).not.toContain('"chapterNumber":106');

@@ -1,3 +1,5 @@
+import { imageDescriptionFields, imageDescriptionValue } from '@/lib/keywords/image-description';
+import { deprecate } from '@/lib/compat/deprecation';
 import { Elysia, t } from 'elysia';
 import { authorize, canModerate } from '@/middleware/authorize';
 import { setup } from '@/setup';
@@ -7,10 +9,11 @@ const params = t.Object({ novelId: t.String({ format: 'uuid' }), chapterNumber: 
 const LEASE_MS = 30 * 60_000;
 const coverResponse = t.Object({
   image: t.Nullable(t.Object({ id: t.String(), url: t.String() })), generating: t.Boolean(),
-  imagePrompt: t.Nullable(t.String()), promptUpdatedAt: t.Nullable(t.Date()), canEditPrompt: t.Boolean(), canRestart: t.Boolean(),
+  imagePrompt: deprecate(t.Nullable(t.String()), { since: '2026-10-24', removeAfter: '2027-04-30', replacement: 'imageDescription' }),
+  imageDescription: t.Nullable(t.String()), promptUpdatedAt: t.Nullable(t.Date()), canEditPrompt: t.Boolean(), canRestart: t.Boolean(),
 });
-const coverSelect = { id: true, image: { select: { id: true, url: true } }, imageId: true, imagePrompt: true, updatedAt: true, coverCreatedById: true, coverLeaseToken: true, coverLeaseExpiresAt: true } as const;
-type CoverRow = { id: string; image: { id: string; url: string } | null; imageId: string | null; imagePrompt: string | null; updatedAt: Date; coverCreatedById: string | null; coverLeaseToken: string | null; coverLeaseExpiresAt: Date | null };
+const coverSelect = { id: true, image: { select: { id: true, url: true } }, imageId: true, imageDescription: true, updatedAt: true, coverCreatedById: true, coverLeaseToken: true, coverLeaseExpiresAt: true } as const;
+type CoverRow = { id: string; image: { id: string; url: string } | null; imageId: string | null; imageDescription: string | null; updatedAt: Date; coverCreatedById: string | null; coverLeaseToken: string | null; coverLeaseExpiresAt: Date | null };
 type CoverActor = { id: string; isGuest: boolean } & Parameters<typeof canModerate>[0];
 const claimResponse = t.Composite([coverResponse, t.Object({ token: t.Nullable(t.String()) })]);
 
@@ -19,7 +22,8 @@ function publicCover(row: CoverRow | null, user: CoverActor) {
   const generating = !!row?.coverLeaseExpiresAt && row.coverLeaseExpiresAt.getTime() > Date.now();
   return {
     image: row?.image ?? null,
-    imagePrompt: row?.imagePrompt ?? null,
+    imageDescription: row?.imageDescription ?? null,
+    imagePrompt: row?.imageDescription ?? null,
     promptUpdatedAt: row?.updatedAt ?? null,
     canEditPrompt: !user.isGuest && !!row && (row.coverCreatedById === user.id || canModerate(user)),
     generating,
@@ -66,18 +70,19 @@ export function coverRoutes(prefix: string) {
         throw new HttpError({ statusCode: 403, message: 'Use an image uploaded by your account' });
       const result = await tx.chapter.updateMany({
         where: { novelId: params.novelId, number: params.chapterNumber, coverCreatedById: authedUser.id, coverLeaseToken: body.token, coverLeaseExpiresAt: { gt: new Date() } },
-        data: { imageId: body.imageId, imagePrompt: body.imagePrompt?.trim() || null, coverLeaseToken: null, coverLeaseExpiresAt: null },
+        data: { imageId: body.imageId, imageDescription: imageDescriptionValue(body)?.trim() || null, coverLeaseToken: null, coverLeaseExpiresAt: null },
       });
       if (!result.count) throw new HttpError({ statusCode: 409, message: 'The chapter cover reservation expired or was already completed' });
       return publicCover(await tx.chapter.findUniqueOrThrow({ where: { novelId_number: { novelId: params.novelId, number: params.chapterNumber } }, select: coverSelect }), authedUser);
     });
-  }, { ...compatibility, params, response: { 200: coverResponse }, body: t.Object({ token: t.String({ format: 'uuid' }), imageId: t.String({ format: 'uuid' }), imagePrompt: t.Optional(t.Nullable(t.String({ maxLength: 180000 }))) }), detail: { summary: 'Save a generated shared chapter cover' } })
+  }, { ...compatibility, params, response: { 200: coverResponse }, body: t.Object({ token: t.String({ format: 'uuid' }), imageId: t.String({ format: 'uuid' }), ...imageDescriptionFields }), detail: { summary: 'Save a generated shared chapter cover' } })
   .delete('/:novelId/:chapterNumber/claim', async ({ prisma, authedUser, params, body }) => {
     await prisma.chapter.updateMany({ where: { novelId: params.novelId, number: params.chapterNumber, coverCreatedById: authedUser.id, coverLeaseToken: body.token }, data: { coverLeaseToken: null, coverLeaseExpiresAt: null } });
     return { ok: true };
   }, { ...compatibility, params, body: t.Object({ token: t.String({ format: 'uuid' }) }), detail: { summary: 'Release an unfinished chapter cover reservation' } });
  return prefix === '/chapter-artwork' ? routes
   .put('/:novelId/:chapterNumber/prompt', async ({ prisma, authedUser, params, body }) => {
+    if (imageDescriptionValue(body) === undefined) throw new HttpError({ statusCode: 422, message: 'An image description is required' });
     return prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(20261016, hashtext(${`${params.novelId}:${params.chapterNumber}`}))`;
       const where = { novelId_number: { novelId: params.novelId, number: params.chapterNumber } };
@@ -87,11 +92,11 @@ export function coverRoutes(prefix: string) {
         throw new HttpError({ statusCode: 403, message: 'Only the cover publisher or a moderator can edit this prompt' });
       if (row.coverLeaseExpiresAt && row.coverLeaseExpiresAt.getTime() > Date.now())
         throw new HttpError({ statusCode: 409, message: 'Wait for chapter cover generation to finish before editing its prompt' });
-      const result = await tx.chapter.updateMany({ where: { id: row.id, updatedAt: new Date(body.baseUpdatedAt) }, data: { imagePrompt: body.imagePrompt.trim() || null, updatedAt: new Date(Math.max(Date.now(), row.updatedAt.getTime() + 1)) } });
+      const result = await tx.chapter.updateMany({ where: { id: row.id, updatedAt: new Date(body.baseUpdatedAt) }, data: { imageDescription: (imageDescriptionValue(body) ?? "").trim() || null, updatedAt: new Date(Math.max(Date.now(), row.updatedAt.getTime() + 1)) } });
       if (!result.count) throw new HttpError({ statusCode: 409, code: 'STALE_WRITE', message: 'The chapter artwork changed. Reload its saved prompt before saving again.' });
       return publicCover(await tx.chapter.findUniqueOrThrow({ where, select: coverSelect }), authedUser);
     });
-  }, { ...compatibility, params, response: { 200: coverResponse }, body: t.Object({ imagePrompt: t.String({ maxLength: 180000 }), baseUpdatedAt: t.String({ format: 'date-time' }) }), detail: { summary: 'Edit a shared chapter cover image prompt' } }) : routes;
+  }, { ...compatibility, params, response: { 200: coverResponse }, body: t.Object({ ...imageDescriptionFields, baseUpdatedAt: t.String({ format: 'date-time' }) }), detail: { summary: 'Edit a shared chapter cover image prompt' } }) : routes;
 }
 
 export const chapterCovers = coverRoutes('/chapter-covers');

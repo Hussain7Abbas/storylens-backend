@@ -1,3 +1,4 @@
+import { imageDescriptionValue } from '@/lib/keywords/image-description';
 import { wordVfxSchema, wordVfxColorSchema } from '@/schemas/word-vfx';
 import { assertNotStale, compareAndSwap } from '@/lib/sync/precondition';
 import { staleWriteSchema } from '@/schemas/common';
@@ -20,6 +21,7 @@ type StyleInput = {
   descriptionEn?: string | null;
   categoryId?: string | null;
   natureId?: string | null;
+  imageDescription?: string | null;
   imagePrompt?: string | null;
   imageId?: string | null;
 };
@@ -48,7 +50,7 @@ export function styleData(body: StyleInput) {
     }),
     categoryId: body.categoryId,
     natureId: body.natureId,
-    imagePrompt: cleanDescription(body.imagePrompt),
+    imageDescription: cleanDescription(imageDescriptionValue(body)),
     imageId: body.imageId,
   };
 }

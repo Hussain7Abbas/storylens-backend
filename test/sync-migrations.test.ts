@@ -248,3 +248,44 @@ describe('chapter artwork consolidation', () => {
     }
   }, 120_000);
 });
+
+describe('image description migration', () => {
+  live('preserves existing descriptions and synchronizes legacy and new column writes', async () => {
+    const migration = '20261024104847_image_descriptions';
+    const workdir = mkdtempSync(join(tmpdir(), 'storylens-image-description-migration-'));
+    const name = `storylens_description_migtest_${process.pid}`;
+    let client: PrismaClient | undefined;
+    try {
+      await prepare(name, workdir, entry => entry < migration);
+      client = await seed(name, [
+        `INSERT INTO "Novel" (id, "nameEn", "updatedAt") VALUES ('description-novel', 'Migration Novel', now())`,
+        `INSERT INTO "Keyword" (id, "nameEn", "novelId", "updatedAt") VALUES ('description-keyword', 'Mira', 'description-novel', now())`,
+        `INSERT INTO "Chapter" (id, number, "novelId", "imagePrompt", "updatedAt") VALUES ('description-chapter', 1, 'description-novel', 'Saved chapter illustration.', now())`,
+        `INSERT INTO "KeywordAlias" (id, "nameEn", "keywordId", "imagePrompt", "updatedAt") VALUES ('description-alias', 'Scout', 'description-keyword', 'Saved alias illustration.', now())`,
+        `INSERT INTO "KeywordVersion" (id, "startingChapter", "keywordId", "imagePrompt", "updatedAt") VALUES ('description-version', 0, 'description-keyword', 'Saved version illustration.', now())`,
+      ]);
+      const deployed = deploy(name, workdir, () => true);
+      expect(deployed.exitCode, deployed.stderr.toString()).toBe(0);
+      for (const [table, id, text] of [
+        ['Chapter', 'description-chapter', 'Saved chapter illustration.'],
+        ['KeywordAlias', 'description-alias', 'Saved alias illustration.'],
+        ['KeywordVersion', 'description-version', 'Saved version illustration.'],
+      ] as const) {
+        const read = () => client!.$queryRawUnsafe<{ imageDescription: string | null; imagePrompt: string | null }[]>(`SELECT "imageDescription", "imagePrompt" FROM "${table}" WHERE id = $1`, id);
+        expect((await read())[0]).toEqual({ imageDescription: text, imagePrompt: text });
+        await client.$executeRawUnsafe(`UPDATE "${table}" SET "imagePrompt" = 'Legacy edit' WHERE id = $1`, id);
+        expect((await read())[0]?.imageDescription).toBe('Legacy edit');
+        await client.$executeRawUnsafe(`UPDATE "${table}" SET "imageDescription" = 'New edit' WHERE id = $1`, id);
+        expect((await read())[0]?.imagePrompt).toBe('New edit');
+        await client.$executeRawUnsafe(`UPDATE "${table}" SET "imageDescription" = NULL WHERE id = $1`, id);
+        expect((await read())[0]).toEqual({ imageDescription: null, imagePrompt: null });
+      }
+    } finally {
+      await client?.$disconnect();
+      const admin = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+      await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+      await admin.$disconnect();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  }, 120_000);
+});

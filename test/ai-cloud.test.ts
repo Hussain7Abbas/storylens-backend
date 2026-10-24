@@ -318,7 +318,7 @@ describe('features', () => {
 
   live('draws an image from a short brief', async () => {
     const user = await newReader(3);
-    ai.steps.push({ kind: 'ok', text: 'A young swordsman in blue robes.' });
+    ai.steps.push({ kind: 'ok', text: JSON.stringify({ imageDescription: 'A young swordsman in blue robes.', referenceImageUrls: [] }) });
     const body = { actionId: crypto.randomUUID(), feature: 'character_image', prompt: 'Long brief about Rand.' };
     const result = await post(user, 'images', body);
     expect(result.last).toMatchObject({
@@ -416,6 +416,7 @@ describe('stream', () => {
 live('chapter covers use a scene brief, landscape ratio, reference images and their own charge', async () => {
   const actor = await newReader(10);
   const referenceImageUrls = ['https://images.example.invalid/mira.jpg'];
+  ai.steps.push({ kind: 'ok', text: JSON.stringify({ imageDescription: 'Mira raises her sword at a burning bridge.', referenceImageUrls }) });
   const response = await post(actor, 'images', { actionId: crypto.randomUUID(), feature: 'chapter_cover', prompt: 'Mira raises her sword at the burning bridge.', referenceImageUrls });
   expect(response.last?.type).toBe('result');
   expect(ai.chats.at(-1)?.system).toContain('single most valuable scene');
@@ -429,15 +430,45 @@ live('chapter covers use a scene brief, landscape ratio, reference images and th
 });
 
 
-live('saved image descriptions reach the image model unchanged without another brief call', async () => {
+live('saved image descriptions are resolved by text AI before drawing', async () => {
   const actor = await newReader(10);
   const prompt = 'A blue-cloaked scout beneath two red moons. Keep the bridge empty.';
   const before = ai.chats.length;
+  const resolved = 'A blue-cloaked scout beneath two red moons, an empty bridge.';
+  ai.steps.push({ kind: 'ok', text: JSON.stringify({ imageDescription: resolved, referenceImageUrls: [] }) });
   const actionId = crypto.randomUUID();
   const response = await post(actor, 'images', { actionId, feature: 'chapter_cover', prompt, promptIsDescription: true });
-  expect(response.last).toMatchObject({ type: 'result', revisedPrompt: prompt, lensesCharged: 3 });
-  expect(ai.chats.length).toBe(before);
-  expect(ai.images.at(-1)).toMatchObject({ prompt, aspectRatio: '16:9' });
+  expect(response.last).toMatchObject({ type: 'result', imageDescription: resolved, revisedPrompt: resolved, lensesCharged: 3 });
+  expect(ai.chats.length).toBe(before + 1);
+  expect(ai.images.at(-1)).toMatchObject({ prompt: resolved, aspectRatio: '16:9' });
   const calls = await prisma.aiCall.findMany({ where: { actionId } });
-  expect(calls.map(call => call.step)).toEqual(['main']);
+  expect(calls.map(call => call.step).sort()).toEqual(['brief', 'main']);
+});
+
+live('invalid structured descriptions refund the action without calling the image model', async () => {
+  const actor = await newReader(10);
+  for (const output of [
+    'Not JSON',
+    JSON.stringify({ imageDescription: 'A scout.', referenceImageUrls: ['https://unknown.example.invalid/scout.png'] }),
+  ]) {
+    const imagesBefore = ai.images.length;
+    ai.steps.push({ kind: 'ok', text: output });
+    const actionId = crypto.randomUUID();
+    const result = await post(actor, 'images', { actionId, feature: 'character_image', prompt: 'Chapter source.' });
+    expect(result.last).toMatchObject({ type: 'error', refunded: true, balance: 10 });
+    expect(ai.images.length).toBe(imagesBefore);
+    const calls = await prisma.aiCall.findMany({ where: { actionId } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ step: 'brief', status: 'failed' });
+  }
+});
+
+live('image generation only receives the references selected for the depicted subjects', async () => {
+  const actor = await newReader(10);
+  const mira = 'https://images.example.invalid/mira.png';
+  const bram = 'https://images.example.invalid/bram.png';
+  ai.steps.push({ kind: 'ok', text: JSON.stringify({ imageDescription: 'Mira crosses an empty bridge.', referenceImageUrls: [mira] }) });
+  const result = await post(actor, 'images', { actionId: crypto.randomUUID(), feature: 'chapter_cover', prompt: '<CHAPTER>Mira crosses a bridge. Bram waits elsewhere.</CHAPTER>', referenceImageUrls: [mira, bram] });
+  expect(result.last).toMatchObject({ type: 'result', imageDescription: 'Mira crosses an empty bridge.' });
+  expect(ai.images.at(-1)).toMatchObject({ prompt: 'Mira crosses an empty bridge.', referenceImageUrls: [mira] });
 });
