@@ -334,6 +334,47 @@ describe('features', () => {
     expect(calls.map((call) => call.step).sort()).toEqual(['brief', 'main']);
   });
 
+  live('streams simultaneous chapter covers separately when the later request finishes first', async () => {
+    const user = await newReader(6);
+    const novelId = crypto.randomUUID();
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    setAiProvider({
+      async chat(input) {
+        const { source } = JSON.parse(input.prompt) as { source: string };
+        return { text: JSON.stringify({ imageDescription: source, referenceImageUrls: [] }), usage: {}, dataPolicy: 'deny' };
+      },
+      async image(input) {
+        if (input.prompt === 'A lantern at sea.') {
+          entered.resolve();
+          await finish.promise;
+        }
+        return { mimeType: 'image/jpeg', base64: btoa(input.prompt), usage: {}, dataPolicy: 'deny' };
+      },
+    });
+    const request = (chapterNumber: number, prompt: string) => ({
+      actionId: crypto.randomUUID(), feature: 'chapter_cover', chapter: { novelId, chapterNumber }, prompt,
+    });
+    const earlier = request(11, 'A lantern at sea.');
+    const later = request(12, 'A bridge in the rain.');
+    const first = post(user, 'images', earlier);
+    try {
+      await Promise.race([entered.promise, first.then((response) => { throw new Error(`First generation ended early: ${response.status}`); })]);
+      const second = await post(user, 'images', later);
+      expect(second.frames[0]).toMatchObject({ type: 'started', actionId: later.actionId });
+      expect(second.last).toMatchObject({ type: 'result', chapter: later.chapter, data: btoa(later.prompt) });
+      finish.resolve();
+      const result = await first;
+      expect(result.frames[0]).toMatchObject({ type: 'started', actionId: earlier.actionId });
+      expect(result.last).toMatchObject({ type: 'result', chapter: earlier.chapter, data: btoa(earlier.prompt) });
+      expect(await balanceOf(user)).toBe(0);
+    } finally {
+      finish.resolve();
+      await first.catch(() => undefined);
+      setAiProvider(ai.provider);
+    }
+  });
+
   live('refunds an image when the brief or the image fails', async () => {
     const user = await newReader(3);
     for (const failure of [

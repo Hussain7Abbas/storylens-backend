@@ -27,6 +27,10 @@ import { HttpError } from '@/utils/errors';
 
 /** Novel research reads this many web results (Exa, $0.007 a request). */
 const RESEARCH_RESULTS = 5;
+const chapterImageKey = t.Object({
+  novelId: t.String({ format: 'uuid' }),
+  chapterNumber: t.Integer({ minimum: 0, maximum: 2147483647 }),
+});
 
 /** JSON mode (tests and scripts) maps stream codes to statuses. */
 const STREAM_STATUS: Record<AiStreamErrorCode, number> = {
@@ -154,7 +158,7 @@ async function runText(
 /** Synthesize a visual brief when needed, then draw it. Never throws. */
 async function runImage(
   prisma: PrismaClient,
-  input: { user: AuthUserPayload; price: AiFeaturePrice; textModel: string; imageModel: string; reasoningEffort: ReasoningEffort; reasoningTokenAllowance: number; imageQuality: ImageQuality; actionId: string; prompt: string; promptIsDescription?: boolean; referenceImageUrls?: string[]; signal: AbortSignal },
+  input: { user: AuthUserPayload; price: AiFeaturePrice; textModel: string; imageModel: string; reasoningEffort: ReasoningEffort; reasoningTokenAllowance: number; imageQuality: ImageQuality; actionId: string; prompt: string; promptIsDescription?: boolean; referenceImageUrls?: string[]; chapter?: typeof chapterImageKey.static; signal: AbortSignal },
   balance: number,
   lensesCharged: number,
 ): Promise<Outcome> {
@@ -203,6 +207,7 @@ async function runImage(
       ok: true,
       frame: {
         type: 'result',
+        ...(input.chapter ? { chapter: input.chapter } : {}),
         mimeType: image.mimeType,
         data: image.base64,
         imageDescription: description.imageDescription,
@@ -322,6 +327,9 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
   .post(
     '/images',
     async ({ prisma, authedUser, body, request }) => {
+      if (body.chapter && body.feature !== 'chapter_cover') {
+        throw new HttpError({ statusCode: 422, message: 'chapter is only supported for chapter covers' });
+      }
       const config = await getBillingConfig(prisma);
       const price = await precheck(prisma, authedUser, config, body, 'image');
       const started = await startAction(prisma, { userId: authedUser.id, price, actionId: body.actionId, attempt: 1 });
@@ -331,7 +339,7 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
         () =>
           runImage(
             prisma,
-            { user: authedUser, price, textModel: config.textModel, imageModel: config.imageModel, reasoningEffort: config.reasoningEffort, reasoningTokenAllowance: config.reasoningTokenAllowance, imageQuality: config.imageQuality, actionId: body.actionId, prompt: body.prompt, promptIsDescription: body.promptIsDescription, referenceImageUrls: body.referenceImageUrls, signal: request.signal },
+            { user: authedUser, price, textModel: config.textModel, imageModel: config.imageModel, reasoningEffort: config.reasoningEffort, reasoningTokenAllowance: config.reasoningTokenAllowance, imageQuality: config.imageQuality, actionId: body.actionId, prompt: body.prompt, promptIsDescription: body.promptIsDescription, referenceImageUrls: body.referenceImageUrls, chapter: body.chapter, signal: request.signal },
             started.balance,
             started.lensesCharged,
           ),
@@ -341,6 +349,7 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
       body: t.Object({
         actionId: t.String({ format: 'uuid' }),
         feature: t.Union([t.Literal('character_image'), t.Literal('chapter_cover')]),
+        chapter: t.Optional(chapterImageKey),
         promptIsDescription: t.Optional(t.Boolean()),
         referenceImageUrls: t.Optional(t.Array(t.String({ pattern: '^https?://[^\\s]+$', maxLength: 2048 }), { maxItems: 8 })),
         prompt: t.String({ minLength: 1, maxLength: 400_000 }),
@@ -348,7 +357,7 @@ export const aiCloud = new Elysia({ prefix: '/ai', tags: ['AI'] })
       detail: {
         summary: 'Draw a character image or chapter cover with Story Lens Cloud AI',
         description:
-          'Streams NDJSON frames like `/ai/prompts`; the `result` frame carries `mimeType`, base64 `data` and `revisedPrompt`.',
+          'Submit each chapter cover as a separate action. Its result echoes the optional `chapter` key and carries `mimeType`, base64 `data` and `revisedPrompt`. Streams NDJSON frames like `/ai/prompts`.',
       },
     },
   );
